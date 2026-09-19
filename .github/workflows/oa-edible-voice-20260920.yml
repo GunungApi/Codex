@@ -20,8 +20,11 @@ jobs:
           run-id: 35458662360
           github-token: ${{ github.token }}
           path: bootstrap
-      - name: Install speech alignment dependencies
-        run: python -m pip install -q cryptography requests faster-whisper
+      - name: Install media and speech alignment dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install -q cryptography requests faster-whisper
       - name: Recover and validate narration without logging source URLs
         run: |
           mkdir -p narration/source
@@ -63,6 +66,7 @@ jobs:
           pathlib.Path('narration/transcription_words.json').write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding='utf-8')
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: oa-edible-narration-v1
           path: narration/
