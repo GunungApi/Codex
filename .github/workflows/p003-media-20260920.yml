@@ -19,9 +19,16 @@ jobs:
         run: |
           python -m pip install faster-whisper
           python - <<'PY'
-          import os,urllib.request,zipfile,io,pathlib,json
-          req=urllib.request.Request('https://api.github.com/repos/GunungApi/Codex/actions/artifacts/10590194673/zip',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-          with urllib.request.urlopen(req) as r: data=r.read()
+          import os,urllib.request,urllib.error,zipfile,io,pathlib,json,time
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,req,fp,code,msg,headers,newurl): return None
+          req=urllib.request.Request('https://api.github.com/repos/GunungApi/Codex/actions/artifacts/10590194673/zip?nocache='+str(time.time_ns()),headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+          try:
+              response=urllib.request.build_opener(NoRedirect).open(req,timeout=60)
+              data=response.read()
+          except urllib.error.HTTPError as e:
+              if e.code not in (301,302,303,307,308): raise
+              with urllib.request.urlopen(e.headers['Location'],timeout=60) as r: data=r.read()
           root=pathlib.Path('/tmp/p003check');root.mkdir()
           zipfile.ZipFile(io.BytesIO(data)).extractall(root)
           from faster_whisper import WhisperModel
