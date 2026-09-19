@@ -19,10 +19,9 @@ jobs:
         run: |
           python -m pip install -q faster-whisper
           python - <<'PY'
-          import os,urllib.request,zipfile,io,json,pathlib
+          import os,subprocess,zipfile,io,json,pathlib
           from faster_whisper import WhisperModel
-          req=urllib.request.Request('https://api.github.com/repos/GunungApi/Codex/actions/artifacts/10586765569/zip',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-          with urllib.request.urlopen(req,timeout=120) as r: data=r.read()
+          data=subprocess.check_output(['curl','--fail','--location','--silent','--show-error','--retry','2','-H','Authorization: Bearer '+os.environ['GH_TOKEN'],'-H','Accept: application/vnd.github+json','https://api.github.com/repos/GunungApi/Codex/actions/artifacts/10586765569/zip'])
           root=pathlib.Path('voice');root.mkdir()
           with zipfile.ZipFile(io.BytesIO(data)) as z:z.extractall(root)
           model=WhisperModel('large-v3',device='cpu',compute_type='int8',cpu_threads=4)
