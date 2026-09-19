@@ -7,11 +7,14 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch generated voice
+      - name: Fetch generated voice previews
         run: |
-          curl -L --fail --retry 3 'https://www.aidocmaker.com/g0/audio?name=7ed051ed4f51455d8cbdb144a4bed2ad' -o p002_voice.bin
-          file p002_voice.bin
+          mkdir -p voice
+          curl -fL --retry 3 'https://storage.googleapis.com/adm--audio-playback--7d--public/mcp-preview/b938198a-a752-4d12-930c-fd249625976f.mp3' -o voice/01.mp3
+          curl -fL --retry 3 'https://storage.googleapis.com/adm--audio-playback--7d--public/mcp-preview/ebe8259c-5af1-4add-b2e2-eec92b6d8e94.mp3' -o voice/02.mp3
+          curl -fL --retry 3 'https://storage.googleapis.com/adm--audio-playback--7d--public/mcp-preview/375d8574-5957-4de2-bcfe-ca9170b5bf50.mp3' -o voice/03.mp3
+          file voice/*
       - uses: actions/upload-artifact@v4
         with:
-          name: p002-voice
-          path: p002_voice.bin
+          name: p002-voice-parts
+          path: voice/
