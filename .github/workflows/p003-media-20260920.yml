@@ -4,6 +4,9 @@ on:
     paths: ['.github/workflows/p003-media-20260920.yml']
 permissions:
   contents: read
+concurrency:
+  group: p003-media-20260920
+  cancel-in-progress: true
 jobs:
   media:
     runs-on: ubuntu-latest
@@ -12,9 +15,12 @@ jobs:
       - name: Make ephemeral receiver key
         run: |
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /tmp/p003-private.pem 2>/dev/null
-          echo P003_PUBLIC_KEY_BEGIN
-          openssl pkey -in /tmp/p003-private.pem -pubout
-          echo P003_PUBLIC_KEY_END
+          openssl pkey -in /tmp/p003-private.pem -pubout > /tmp/p003-public.pem
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p003-public-key
+          path: /tmp/p003-public.pem
+          retention-days: 1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -23,6 +29,7 @@ jobs:
           mkdir -p /tmp/p003-result/wheels /tmp/p003-result/voice
           python -m pip download --only-binary=:all: moderngl glcontext -d /tmp/p003-result/wheels
           python -m pip install faster-whisper
+          if ! command -v ffprobe; then sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; fi
       - name: Receive encrypted locations and retrieve narration
         run: |
           python - <<'PY'
@@ -64,6 +71,7 @@ jobs:
           (dest/'transcription_words.json').write_text(json.dumps(all_results,ensure_ascii=False,indent=2))
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: p003-media-20260920
           path: /tmp/p003-result
