@@ -1,0 +1,17 @@
+name: Fetch P002 voice
+on:
+  push:
+    paths:
+      - '.github/workflows/fetch_p002_voice.yml'
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch generated voice
+        run: |
+          curl -L --fail --retry 3 'https://www.aidocmaker.com/g0/audio?name=7ed051ed4f51455d8cbdb144a4bed2ad' -o p002_voice.bin
+          file p002_voice.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p002-voice
+          path: p002_voice.bin
