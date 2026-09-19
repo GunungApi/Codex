@@ -1,50 +1,57 @@
-name: P003 recovered narration alignment check
+name: P003 corrected narration recovery
 on:
   push:
     paths: ['.github/workflows/p003-media-20260920.yml']
 permissions:
   contents: read
-  actions: read
 jobs:
-  check:
+  voice:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
+      - name: Make transient key
+        run: |
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /tmp/private.pem 2>/dev/null
+          openssl pkey -in /tmp/private.pem -pubout > /tmp/public.pem
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p003-corrected-public-key
+          path: /tmp/public.pem
+          retention-days: 1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Check preserved narration
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Retrieve and align corrected voice
         run: |
           python -m pip install faster-whisper
           python - <<'PY'
-          import os,urllib.request,urllib.error,zipfile,io,pathlib,json,time
-          class NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self,req,fp,code,msg,headers,newurl): return None
-          req=urllib.request.Request('https://api.github.com/repos/GunungApi/Codex/actions/artifacts/10590194673/zip?nocache='+str(time.time_ns()),headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-          try:
-              response=urllib.request.build_opener(NoRedirect).open(req,timeout=60)
-              data=response.read()
-          except urllib.error.HTTPError as e:
-              if e.code not in (301,302,303,307,308): raise
-              with urllib.request.urlopen(e.headers['Location'],timeout=60) as r: data=r.read()
-          root=pathlib.Path('/tmp/p003check');root.mkdir()
-          zipfile.ZipFile(io.BytesIO(data)).extractall(root)
+          import urllib.request,urllib.error,time,json,base64,subprocess,pathlib
+          root=pathlib.Path('/tmp/corrected');root.mkdir()
+          endpoint='https://raw.githubusercontent.com/GunungApi/Codex/main/.github/p003-corrected-input.json'
+          payload=None
+          for _ in range(60):
+              try:
+                  with urllib.request.urlopen(endpoint+'?t='+str(time.time_ns()),timeout=20) as r:payload=json.load(r)
+                  break
+              except (urllib.error.URLError,json.JSONDecodeError):time.sleep(10)
+          if payload is None:raise RuntimeError('Input not received')
+          cipher=pathlib.Path('/tmp/cipher');cipher.write_bytes(base64.b64decode(payload['encrypted_location']))
+          p=subprocess.run(['openssl','pkeyutl','-decrypt','-inkey','/tmp/private.pem','-in',str(cipher),'-pkeyopt','rsa_padding_mode:oaep','-pkeyopt','rsa_oaep_md:sha256'],capture_output=True,check=True)
+          url=p.stdout.decode().strip()
+          if not url.startswith('https://storage.googleapis.com/adm--audio-playback--7d--public/mcp-preview/'):raise RuntimeError('Unexpected source')
+          with urllib.request.urlopen(url,timeout=60) as r:(root/'02_corrected.mp3').write_bytes(r.read())
+          pathlib.Path('/tmp/private.pem').unlink(missing_ok=True)
           from faster_whisper import WhisperModel
           model=WhisperModel('medium',device='cpu',compute_type='int8',cpu_threads=4)
-          results=[]
-          for path in sorted((root/'voice').glob('*.mp3')):
-              segments,info=model.transcribe(str(path),language='ja',word_timestamps=True,beam_size=5,vad_filter=False,initial_prompt='物質、反物質、対消滅、粒子、ひと組ずつ、相手のいない分が残ります、偏り。')
-              out=[]
-              for s in segments:out.append({'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]})
-              results.append({'file':path.name,'segments':out})
-              print(path.name, ''.join(s['text'] for s in out),flush=True)
-          (root/'transcription_medium.json').write_text(json.dumps(results,ensure_ascii=False,indent=2))
+          segments,info=model.transcribe(str(root/'02_corrected.mp3'),language='ja',word_timestamps=True,beam_size=5,vad_filter=False,initial_prompt='物質、反物質、対消滅、ひと組ずつ、相手のいない分が残ります、偏り。')
+          out=[]
+          for s in segments:out.append({'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]})
+          (root/'transcription_corrected.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          print(''.join(s['text'] for s in out))
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: p003-alignment-checked
-          path: /tmp/p003check/transcription_medium.json
+          name: p003-corrected-voice
+          path: /tmp/corrected
           retention-days: 1
