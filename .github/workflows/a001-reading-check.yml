@@ -1,0 +1,39 @@
+name: A001 Japanese reading check
+on:
+  push:
+    paths: ['.github/workflows/a001-reading-check.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Retrieve saved narration and check with a larger model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m pip install -q faster-whisper
+          python - <<'PY'
+          import os,urllib.request,zipfile,io,json,pathlib
+          from faster_whisper import WhisperModel
+          req=urllib.request.Request('https://api.github.com/repos/GunungApi/Codex/actions/artifacts/10586765569/zip',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+          with urllib.request.urlopen(req,timeout=120) as r: data=r.read()
+          root=pathlib.Path('voice');root.mkdir()
+          with zipfile.ZipFile(io.BytesIO(data)) as z:z.extractall(root)
+          model=WhisperModel('large-v3',device='cpu',compute_type='int8',cpu_threads=4)
+          for path in sorted(root.glob('*.mp3')):
+              segs,info=model.transcribe(str(path),language='ja',beam_size=5,word_timestamps=True,vad_filter=True,initial_prompt='オリオン腕。アルファ文明。原子。知性。仮説。応答。後世。')
+              result=[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segs]
+              path.with_suffix('.large.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+              print(path.name, ''.join(s['text'] for s in result),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: a001-reading-check
+          path: voice/*.large.json
+          retention-days: 1
