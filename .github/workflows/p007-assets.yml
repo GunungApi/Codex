@@ -80,7 +80,8 @@ jobs:
         with:
           python-version: '3.13'
       - name: Fetch compatible render packages
-        run: python -m pip download --only-binary=:all: --dest wheels moderngl glcontext
+        run: |
+          python -m pip download --only-binary=:all: --dest wheels moderngl glcontext
       - uses: actions/upload-artifact@v4
         with:
           name: p007-raw-and-render-packages
