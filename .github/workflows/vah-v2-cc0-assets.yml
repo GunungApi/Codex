@@ -1,0 +1,37 @@
+name: VAH v2 CC0 model assets
+on:
+  push:
+    paths: ['.github/workflows/vah-v2-cc0-assets.yml']
+permissions:
+  contents: read
+jobs:
+  assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Retrieve pinned graphical assets and their license
+        run: |
+          python - <<'PY'
+          import urllib.request,json,pathlib,hashlib
+          commit='1f508f6083b2f823dab15de924b3bde72e08d77c'
+          root='https://raw.githubusercontent.com/makehumancommunity/makehuman/'+commit+'/'
+          out=pathlib.Path('assets');out.mkdir();manifest=[]
+          paths=['LICENSE.md','LICENSE.ASSETS.md','makehuman/data/3dobjs/base.obj']
+          for folder in ['makehuman/data/targets/macrodetails','makehuman/data/eyes/high-poly','makehuman/data/eyes/low-poly']:
+              url='https://api.github.com/repos/makehumancommunity/makehuman/contents/'+folder+'?ref='+commit
+              try:
+                  items=json.load(urllib.request.urlopen(url,timeout=30))
+                  paths += [v['path'] for v in items if v['type']=='file' and (v['name'].endswith('.obj') or (v['name'].endswith('.target') and ('male-young' in v['name'] or 'young' in v['name'] and 'average' in v['name'])))]
+              except Exception as e: print('Optional directory not used:',folder,type(e).__name__)
+          for src in paths:
+              b=urllib.request.urlopen(root+src,timeout=45).read()
+              dst=out/src;dst.parent.mkdir(parents=True,exist_ok=True);dst.write_bytes(b)
+              manifest.append({'source':root+src,'path':src,'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+          (out/'asset_manifest.json').write_text(json.dumps(manifest,indent=2))
+          print('CC0 assets saved:',[(p['path'],p['bytes']) for p in manifest])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vah-v2-cc0-geometry
+          path: assets/
+          retention-days: 1
