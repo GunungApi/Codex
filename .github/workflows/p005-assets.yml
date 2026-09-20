@@ -13,29 +13,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Prepare transient receiver and renderer dependencies
+      - name: Prepare ephemeral receiver
         run: |
           mkdir -p bootstrap assets/voice
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/p005_private.pem 2>/dev/null
           openssl pkey -in /tmp/p005_private.pem -pubout -out bootstrap/public.pem
-          python -m pip download --dest bootstrap --only-binary=:all: --no-deps --python-version 313 --abi cp313 --platform manylinux2014_x86_64 moderngl glcontext
       - uses: actions/upload-artifact@v4
         with:
-          name: p005-bootstrap
+          name: p005-bootstrap-v2
           path: bootstrap/
           retention-days: 1
-      - name: Retrieve authorized voice assets without logging temporary links
+      - name: Recover original voice files
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python -m pip -q install cryptography requests faster-whisper
           python - <<'PY'
-          import os,time,json,base64,requests,subprocess
+          import os,time,json,base64,requests,av
           from pathlib import Path
           from cryptography.hazmat.primitives import serialization,hashes
           from cryptography.hazmat.primitives.asymmetric import padding
           key=serialization.load_pem_private_key(Path('/tmp/p005_private.pem').read_bytes(),password=None)
-          url=f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/contents/p005_encrypted_input.json"
+          url=f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/contents/p005_encrypted_input_v2.json"
           headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
           for trial in range(160):
               r=requests.get(url,params={'ref':os.environ['GITHUB_REF_NAME']},headers=headers,timeout=20)
@@ -43,21 +42,41 @@ jobs:
               time.sleep(5)
           else: raise RuntimeError('No encrypted production inputs received')
           entries=json.loads(base64.b64decode(r.json()['content']))
-          from faster_whisper import WhisperModel
-          model=WhisperModel('small',device='cpu',compute_type='int8',cpu_threads=4)
-          records=[]
+          scripts=[]
           for e in entries:
               link=key.decrypt(base64.b64decode(e['encrypted_url']),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None)).decode()
-              response=requests.get(link,timeout=120);response.raise_for_status()
+              response=requests.get(link,timeout=120)
+              if response.status_code!=200: raise RuntimeError('Audio retrieval unsuccessful')
               path=Path('assets/voice')/e['file'];path.write_bytes(response.content)
-              subprocess.run(['ffmpeg','-v','error','-i',str(path),'-f','null','-'],check=True)
-              segs,info=model.transcribe(str(path),language='ja',word_timestamps=True,beam_size=5,initial_prompt=e['transcript'])
-              records.append({'file':e['file'],'script':e['transcript'],'segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segs]})
-              print('Validated and transcribed',e['file'],len(response.content),'bytes',flush=True)
-          Path('assets/transcription.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+              with av.open(str(path)) as c:
+                  sample_count=sum(f.samples for f in c.decode(audio=0))
+              if sample_count<1000:raise RuntimeError('Incomplete audio')
+              scripts.append({'file':e['file'],'script':e['transcript']})
+              print('Validated',e['file'],sample_count,'samples',flush=True)
+          Path('assets/scripts.json').write_text(json.dumps(scripts,ensure_ascii=False))
           Path('/tmp/p005_private.pem').unlink()
           PY
       - uses: actions/upload-artifact@v4
+        with:
+          name: p005-original-voice
+          path: assets/
+          retention-days: 1
+      - name: Align Japanese word timestamps
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          model=WhisperModel('small',device='cpu',compute_type='int8',cpu_threads=4)
+          records=[]
+          for e in json.loads(Path('assets/scripts.json').read_text()):
+              segs,info=model.transcribe(str(Path('assets/voice')/e['file']),language='ja',word_timestamps=True,beam_size=5,initial_prompt=e['script'])
+              records.append({**e,'segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segs]})
+              print('Aligned',e['file'],flush=True)
+          Path('assets/transcription.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: p005-voice-aligned
           path: assets/
