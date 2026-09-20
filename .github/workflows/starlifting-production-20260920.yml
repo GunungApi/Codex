@@ -1,4 +1,4 @@
-name: Starlifting production recovery
+name: Starlifting narration verification
 on:
   push:
     paths:
@@ -7,7 +7,7 @@ permissions:
   contents: read
   actions: read
 jobs:
-  recover:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -16,52 +16,12 @@ jobs:
           python-version: '3.11'
       - uses: actions/download-artifact@v4
         with:
-          name: starlifting-envelope-key
-          run-id: 35514437727
+          name: starlifting-audio-aligned
+          run-id: 35514743046
           github-token: ${{ github.token }}
-          path: key
-      - name: Install audio readers
-        run: pip install cryptography requests faster-whisper
-      - name: Retrieve the eight narration clips generated for this video
-        run: |
-          python - <<'PY'
-          # The envelope protects temporary voice links from public source history.
-          # It contains only eight AI Doc Maker preview MP3 URLs, generated in this chat.
-          # This step has no GitHub write token and changes no remote account data.
-          import base64,json,hashlib,requests,av
-          from pathlib import Path
-          from cryptography.hazmat.primitives import serialization,hashes
-          from cryptography.hazmat.primitives.asymmetric import padding
-          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-          e=json.loads('''{"key":"pR2K+YV7MuP+tTmdud9oNFwUs1UIM6mMNbg1maX+QSHfndbNHrWV8aXyNXOcrn9+Gm6EwRkzBjSmnCzZBOd3oASJoTv57vV0Myb9a9Bkh6y9cksyA98Yfuj89riTgV+K8w5iRW4k216a6DhjCtPRaFTJRDcQM3hK1AYRk3xF7tN0XEE8Lg2mOCO0yG/KqhdSYyP1szzjvJgokVk6EMi2253ygmW4bLabgnPEV0tZ04LlWvAahf2At3LByUJHtvpvozbb3nqCeEDd/qCHPYyDmInWBocvN3+rzx5JmQ4r5+EtGONCPrWLARxDJ97qqpKFyC+Dr6xB1RofBbe718ZLSSB1Db4vsCwdGBuK5JHn+SJ2demZGmWejiq4b0jqQ5z4MhYAPaJJO/pXgor5PIW+i3wMBnfUOpH8FvijY6WXhKjoyxVpJXhHVFrnJbmXAnz5zWpAn31CZRapdC797CEHlZiq3Ce05wBrZSJSxIcNBz6zakJL8cXfUyidgHZBoB9+","nonce":"qZ+SnN5PGCiUCpZT","data":"U61uGSBps5Yj7veKDPBJ+FACJYr4tE98YctZT7H0ZsC+/kc980x1Vond9lRl1DUxOQWS1mmozvgULgQS1M6aA3bd2WcEyfyS1gwNrsbMtV0zbi/JmNiSVwiQKjAMU4ychxNVHxnY5cxqQW8Krtu6AuxoWvFcSyCUuUsnM6+rscvsUX30yvUr3Rw7KCc3u7repNN7x/vXL+4F/wSxjgeLfO52WDdVPYRMvSckM8Zv5hsL1Kx12oQpm/mheykFXX25/FEjTHcNRSzR7UBMRrRnlPmr0xYfrpk1WmUMF5e6fa+FmhGf5D5iEJ/ATIB64waq1+ACnhCK7r7whUfhQTlLHXK2+IusAh/aP0a7RoaZKuJgIJdLbuZ6ZUz6bQA6/v14I8PnhErIL2pNQDd147H3Vx10om7koCb8LxWY48d1ZOm27uZSSQmFmQqG7UVviS9JMUWV9RKGgShxQLUdsqrdStwmsNfe8tde51TM9mCWhEnQPSH/9IMw1NRswal7pGNi1ek6cdlxdcuQ6igZd4oKEbCWjZElHaR18Vbf09l/IL606+gIoR4r5suCs8n1Vk/mXh4f8IBQQJlsFYWTGpYjEEYB1WbdQBdboy3LQUg1i0avigdv2OHK9IQ577eHbZBs+lA5n5LrHMgj65bUPobY63EnghtmHQfdbKeDTU8JX6ayxIP/4f8PfKoEq9i+wGa/Tu+pyPPcnW1q+uCPAZ+cbXPg30EXQgpWSf+AmEn7gH/VApNP7aLJhSWxYwD/U4qUVlz9Baz24mpfZXQHW5oK5P+V+NENfww/F9/N0EGUavGRv/ioDKTIbU37+WcmBKS3FXEOT+tmAbNuedrcvnjRBQZpdZudmDC2QfvJa4r9cmiyUlSorEFDKUMFEGa+jEKzAdpR7zb7Lm5IPxwQWfvpPm44uAO9izIDGjY0Yaz2N5xdk30GDYJTyHb5ChycFAFnaAEQKT2JduurADBn2Ktvb93wX+rToWS9TVZ0BaDndxWOWhuGFMBYortYug9uszPJKht8rY5OruqSKFTYQB2+27cRp9BcjkwFs5MMAtdRHTrNG09LjFB5uW9hbi2ML6v9yZdiq8t3GT9oLU+0kn7f+BEocHhkb5Yr0JbVEwM27JWINwqdRaIHD8Jy0ZgZ6Q1cEiQr7uEiyhDty66Z+L8pnyjhM8mTquCrhudAd0+PbxNMXpFsJssxh5dRPshmVJoTbWSgC4kv1u/azAXeN63RZmVDFdotOMBbUiEItFxgk+dArsjbfmp0V5ksL5xp29Fb5TaFfVYbhWU="}''')
-          dec=base64.b64decode
-          keypath=Path('key/private.pem')
-          k=serialization.load_pem_private_key(keypath.read_bytes(),password=None)
-          aes=k.decrypt(dec(e['key']),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
-          urls=json.loads(AESGCM(aes).decrypt(dec(e['nonce']),dec(e['data']),None))
-          assert len(urls)==8
-          Path('out/source').mkdir(parents=True,exist_ok=True)
-          Path('out/checks').mkdir(exist_ok=True)
-          rows=[]
-          for i,u in enumerate(urls,1):
-              assert u.startswith('https://storage.googleapis.com/adm--audio-playback--7d--public/mcp-preview/') and u.endswith('.mp3')
-              r=requests.get(u,timeout=90,allow_redirects=False)
-              if r.status_code!=200: raise RuntimeError('Segment recovery failed: '+str(i))
-              p=Path(f'out/source/{i:02}.mp3');p.write_bytes(r.content)
-              with av.open(str(p)) as c:
-                  frames=list(c.decode(audio=0));samples=sum(f.samples for f in frames);sr=frames[0].sample_rate
-              assert samples>sr*2
-              rows.append({'file':p.name,'seconds':samples/sr,'sample_rate':sr,'sha256':hashlib.sha256(r.content).hexdigest()})
-          Path('out/checks/recovery.json').write_text(json.dumps(rows,indent=2))
-          keypath.unlink()
-          print('Recovered and decoded eight narration segments.')
-          PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: starlifting-original-audio
-          path: out/
-          retention-days: 1
-      - name: Generate Japanese speech timestamps
+          path: audio
+      - run: pip install faster-whisper
+      - name: Verify speech with a larger Japanese-capable model
         env:
           HF_HUB_DISABLE_PROGRESS_BARS: '1'
         run: |
@@ -69,18 +29,19 @@ jobs:
           import json
           from pathlib import Path
           from faster_whisper import WhisperModel
-          m=WhisperModel('small',device='cpu',compute_type='int8',cpu_threads=4)
+          m=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
           data=[]
-          for p in sorted(Path('out/source').glob('*.mp3')):
-              segs,info=m.transcribe(str(p),language='ja',beam_size=5,word_timestamps=True,vad_filter=False,initial_prompt='スターリフティング。恒星、表層、外層、プラズマ、電子、原子核、水素、ヘリウム、磁場、極、磁気ノズル、回収設備。')
+          for p in sorted(Path('audio/source').glob('*.mp3')):
+              segs,info=m.transcribe(str(p),language='ja',beam_size=5,word_timestamps=True,vad_filter=False,initial_prompt='スターリフティング。光で加熱し、磁場で導く。恒星、表層、外層、プラズマ、電子、原子核、水素、ヘリウム、極、磁気ノズル、回収設備。集める、加熱する、導く、回収する。遠未来の資源工場。')
               rows=[]
               for s in segs:
                   rows.append({'start':s.start,'end':s.end,'text':s.text,'words':[{'word':w.word,'start':w.start,'end':w.end,'probability':w.probability} for w in s.words]})
               data.append({'file':p.name,'segments':rows})
-          Path('out/checks/transcription_words.json').write_text(json.dumps(data,ensure_ascii=False,indent=2))
+          Path('verification').mkdir(exist_ok=True)
+          Path('verification/transcription_large_words.json').write_text(json.dumps(data,ensure_ascii=False,indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: starlifting-audio-aligned
-          path: out/
+          name: starlifting-large-word-verification
+          path: verification/
           retention-days: 1
