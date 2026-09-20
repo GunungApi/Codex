@@ -1,0 +1,42 @@
+name: Starlifting production recovery
+on:
+  push:
+    paths:
+      - '.github/workflows/starlifting-production-20260920.yml'
+permissions:
+  contents: read
+  actions: write
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare renderer dependencies
+        run: |
+          mkdir -p out/wheels
+          pip download --only-binary=:all: --no-deps -d out/wheels moderngl glcontext
+          pip install cryptography requests
+      - name: Create temporary envelope key
+        run: |
+          mkdir -p key
+          python - <<'PY'
+          from cryptography.hazmat.primitives.asymmetric import rsa
+          from cryptography.hazmat.primitives import serialization
+          from pathlib import Path
+          k = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+          Path('key/private.pem').write_bytes(k.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()))
+          Path('out/public.pem').write_bytes(k.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: starlifting-envelope-key
+          path: key/private.pem
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: starlifting-renderer-bootstrap
+          path: out/
+          retention-days: 1
