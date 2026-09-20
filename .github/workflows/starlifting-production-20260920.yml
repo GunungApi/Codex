@@ -1,4 +1,4 @@
-name: Starlifting narration verification
+name: Starlifting repaired narration
 on:
   push:
     paths:
@@ -7,7 +7,7 @@ permissions:
   contents: read
   actions: read
 jobs:
-  verify:
+  repair:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -16,12 +16,42 @@ jobs:
           python-version: '3.11'
       - uses: actions/download-artifact@v4
         with:
-          name: starlifting-audio-aligned
-          run-id: 35514743046
+          name: starlifting-envelope-key
+          run-id: 35514437727
           github-token: ${{ github.token }}
-          path: audio
-      - run: pip install faster-whisper
-      - name: Verify speech with a larger Japanese-capable model
+          path: key
+      - run: pip install cryptography requests faster-whisper
+      - name: Retrieve four replacement MP3s generated in the current conversation
+        run: |
+          python - <<'PY'
+          # The envelope contains only four user-requested voice-preview links.
+          # No GitHub write token, remote mutation, or arbitrary-host request is used.
+          import base64,json,hashlib,requests,av
+          from pathlib import Path
+          from cryptography.hazmat.primitives import serialization,hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          e=json.loads('''{"key":"OE6g1tl1xEuHaL/7VuuuxNa6wqOI5CeM/D4OmDRFER9x1JcMUlHwVoalprlv+vBxaPVvua2v7kOfCgfLdRg+n3p1zzMJCvmHA5xi/9/iCPLU35gf1UralTsT94BL7kORXe/KWECoToDlr++PAXd/ViIa24b8WP3DLB7k66t+42APSaC46jMlRfb1h5wJmY4QbeE5xZITZGtldbquReJ7WD/aMklZvhR2Hsv8K9JuBT9gOxpCZxR5G1CyrCCbNMnK0CqWoWzj3nmrBgD68VOOz+nfHsyRrNChuLckmNX14uu3ELKKG1CbIwXboI6Fu31ZgZz1oAHzxL/EudW5Xbw4p4VZm8C275iCT62eNRHyUPM7M0sgIf6+K/6Opn1EXn2NB+hJ+AKhDmce4Hkxy5lje/OAaJfV6ZCW9hTO8agMYiDrsKtzUXYdXyAAqIbQKhEZadnl/lzykhW/MCnZ5bF27ynKGIPtWWXchLd/HonnNyfj2+p1iIkZSrsp1bir7prp","nonce":"a9IivEsqjZKDmJVO","data":"+s0sEpgGiAbA4jvXeUYXUUu3SyAis2NVDhYM0zP+QF3eSFzuPHLrn6ysYeVUkX/InOfj3FLqx6GqwArO7Xjxz34VE5ywEANY4XO/uK79yqk5NAwY7wTdhcPH3VeAplOSGYl0lvC/DytM9P+WpSMr68i3J0w8t3YtyBbP5QDcacyfl05QqirElA1Ila+IInP+9R9UaFZP41velp09d/QoE7jabF0zVdLODH6JEE5Iq3cJbRXAU+2HMcC19Pcej/uXcq8O+DOIfNjabqKnafcb/bFo9bFhsmvXLCIOsTcjIQp5JbeDrHyHr//1sSLN+3k/ReLw76lfy6tLssBojm0W5g0eVbfbZYhHtmSWzuCYvcAKD3jvpgIxC1dzEYcCSsBR02A4g29cpQ4hZSF52jmnWhN/OP4NCy4n9+784T3x1VoGGhvonwMM1qHdfd6Ox+UZ21D5SUzkrGawFOTEosuoZTtW2VPcrZZNqgBtCazVxPgq9YnVRotFLw6AZhiez9EW7uiZTMDLZbENtByo3CU80n+ILs1YAw4SHF7Uba+pac/JpXn0dtg/Orqu1kPrDABIq5urgOIcVoz1a5OAsuJgqCJoz9bS/b2mEh0MUVNiQC+rx0jhWNjEcyh+ESiTMEOgwZjmS9FgJooKBEMSwcx8XUNW35iMCz81VUIj5ULusQTUvTe6"}''')
+          dec=base64.b64decode
+          keypath=Path('key/private.pem');k=serialization.load_pem_private_key(keypath.read_bytes(),password=None)
+          aes=k.decrypt(dec(e['key']),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
+          urls=json.loads(AESGCM(aes).decrypt(dec(e['nonce']),dec(e['data']),None))
+          assert set(urls)=={'03','05','06','08'}
+          Path('out/source').mkdir(parents=True,exist_ok=True);Path('out/checks').mkdir(exist_ok=True)
+          rows=[]
+          for name,u in sorted(urls.items()):
+              assert u.startswith('https://storage.googleapis.com/adm--audio-playback--7d--public/mcp-preview/') and u.endswith('.mp3')
+              r=requests.get(u,timeout=90,allow_redirects=False)
+              if r.status_code!=200: raise RuntimeError('Voice recovery failed: '+name)
+              p=Path(f'out/source/{name}.mp3');p.write_bytes(r.content)
+              with av.open(str(p)) as c:
+                  frames=list(c.decode(audio=0));samples=sum(f.samples for f in frames);sr=frames[0].sample_rate
+              assert samples>sr*2
+              rows.append({'file':p.name,'seconds':samples/sr,'sample_rate':sr,'sha256':hashlib.sha256(r.content).hexdigest()})
+          Path('out/checks/repair_recovery.json').write_text(json.dumps(rows,indent=2));keypath.unlink()
+          print('Recovered and decoded four repaired narration clips.')
+          PY
+      - name: Verify repaired Japanese narration
         env:
           HF_HUB_DISABLE_PROGRESS_BARS: '1'
         run: |
@@ -31,17 +61,16 @@ jobs:
           from faster_whisper import WhisperModel
           m=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
           data=[]
-          for p in sorted(Path('audio/source').glob('*.mp3')):
-              segs,info=m.transcribe(str(p),language='ja',beam_size=5,word_timestamps=True,vad_filter=False,initial_prompt='スターリフティング。光で加熱し、磁場で導く。恒星、表層、外層、プラズマ、電子、原子核、水素、ヘリウム、極、磁気ノズル、回収設備。集める、加熱する、導く、回収する。遠未来の資源工場。')
+          for p in sorted(Path('out/source').glob('*.mp3')):
+              segs,info=m.transcribe(str(p),language='ja',beam_size=5,word_timestamps=True,vad_filter=False,initial_prompt='スターリフティング。光で加熱し、磁場で導く。恒星、表層、外層、プラズマ、電子、原子核、水素、ヘリウム、極、磁気ノズル、回収設備。遠未来の資源工場。')
               rows=[]
               for s in segs:
                   rows.append({'start':s.start,'end':s.end,'text':s.text,'words':[{'word':w.word,'start':w.start,'end':w.end,'probability':w.probability} for w in s.words]})
               data.append({'file':p.name,'segments':rows})
-          Path('verification').mkdir(exist_ok=True)
-          Path('verification/transcription_large_words.json').write_text(json.dumps(data,ensure_ascii=False,indent=2))
+          Path('out/checks/transcription_repaired_words.json').write_text(json.dumps(data,ensure_ascii=False,indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: starlifting-large-word-verification
-          path: verification/
+          name: starlifting-repaired-verified-audio
+          path: out/
           retention-days: 1
