@@ -1,0 +1,74 @@
+name: P007 short voice pickup
+on:
+  push:
+    branches: [production/p007-20260921]
+    paths: [.github/workflows/p007-word-repair.yml]
+permissions:
+  contents: write
+jobs:
+  pickup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Encrypted pickup recovery
+        env:
+          TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN: ${{ github.run_id }}
+        run: |
+          python - <<'PY'
+          import os,json,pathlib,base64,subprocess,hashlib,time,urllib.request,urllib.parse,urllib.error
+          root='https://api.github.com/repos/'+os.environ['REPO']+'/contents/workbench/'
+          headers={'Authorization':'Bearer '+os.environ['TOKEN'],'Accept':'application/vnd.github+json'}
+          def get(n):
+              with urllib.request.urlopen(urllib.request.Request(root+n+'?ref='+urllib.parse.quote(os.environ['BRANCH'],safe=''),headers=headers)) as r:return json.load(r)
+          key='/tmp/pickup.pem'
+          subprocess.run(['openssl','genpkey','-algorithm','RSA','-pkeyopt','rsa_keygen_bits:3072','-out',key],check=True,stderr=subprocess.DEVNULL)
+          os.chmod(key,0o600);pub=subprocess.check_output(['openssl','pkey','-in',key,'-pubout']).decode();kid=hashlib.sha256(pub.encode()).hexdigest()
+          body={'message':'P007 short pickup public key','branch':os.environ['BRANCH'],'content':base64.b64encode(json.dumps({'pem':pub,'key_sha256':kid,'run_id':os.environ['RUN']}).encode()).decode()}
+          req=urllib.request.Request(root+'p007_phrase_key.json',data=json.dumps(body).encode(),headers=headers,method='PUT')
+          with urllib.request.urlopen(req) as r:r.read()
+          payload=None
+          for _ in range(90):
+              try:
+                  obj=json.loads(base64.b64decode(get('p007_phrase_cipher.json')['content']))
+                  if obj['key_sha256']==kid:payload=obj;break
+              except urllib.error.HTTPError as e:
+                  if e.code!=404:raise
+              time.sleep(5)
+          if payload is None:raise RuntimeError('No encrypted pickup input')
+          try:
+              url=subprocess.check_output(['openssl','pkeyutl','-decrypt','-inkey',key,'-pkeyopt','rsa_padding_mode:oaep','-pkeyopt','rsa_oaep_md:sha256'],input=base64.b64decode(payload['sealed_url'])).decode()
+              if not url.startswith('https://storage.googleapis.com/adm--audio-playback--7d--public/'):raise ValueError('Unexpected host')
+              with urllib.request.urlopen(url,timeout=60) as r:data=r.read(1000000)
+              pathlib.Path('phrase.mp3').write_bytes(data)
+              pathlib.Path('pickup_receipt.json').write_text(json.dumps({'run_id':os.environ['RUN'],'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}))
+          finally:pathlib.Path(key).unlink(missing_ok=True)
+          PY
+      - name: Check pickup pronunciation and boundaries
+        run: |
+          python -m pip install --quiet faster-whisper
+          python - <<'PY'
+          from faster_whisper import WhisperModel
+          import json,pathlib
+          m=WhisperModel('medium',device='cpu',compute_type='int8',cpu_threads=4)
+          seg,info=m.transcribe('phrase.mp3',language='ja',beam_size=5,word_timestamps=True)
+          out={'duration':info.duration,'segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word} for w in s.words]} for s in seg]}
+          print(''.join(s['text'] for s in out['segments']))
+          pathlib.Path('phrase_alignment.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p007-short-pickup
+          path: |
+            phrase.mp3
+            phrase_alignment.json
+            pickup_receipt.json
+          retention-days: 1
+      - name: Remove private key
+        if: always()
+        run: rm -f /tmp/pickup.pem
