@@ -1,0 +1,98 @@
+name: B001 narration retrieval 20260922
+on:
+  push:
+    paths: ['.github/workflows/b001_audio_20260922.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  retrieve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: b001-private-transfer-key
+          path: private
+          run-id: 35629230020
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Recover authorized narration files without exposing temporary locators
+        run: |
+          python -m pip install cryptography faster-whisper numpy astropy healpy
+          python - <<'PY'
+          import json,base64,pathlib,urllib.request,hashlib,subprocess
+          from cryptography.hazmat.primitives import serialization,hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          key=serialization.load_pem_private_key(pathlib.Path('private/key.pem').read_bytes(),password=None)
+          encrypted=["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"]
+          out=pathlib.Path('audio');out.mkdir()
+          report=[]
+          for i,enc in enumerate(encrypted,1):
+              url=key.decrypt(base64.b64decode(enc),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None)).decode()
+              print('::add-mask::'+url,flush=True)
+              try:
+                  with urllib.request.urlopen(url,timeout=60) as r: data=r.read()
+              except Exception: raise RuntimeError('Narration download failed for segment '+str(i)) from None
+              p=out/f'{i:02d}.mp3';p.write_bytes(data)
+              report.append({'segment':i,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+          (out/'download_validation.json').write_text(json.dumps(report,indent=2))
+          pathlib.Path('private/key.pem').unlink()
+          print('Recovered',len(report),'narration files')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b001-narration-originals
+          path: audio/
+          retention-days: 1
+          if-no-files-found: error
+      - name: Align actual spoken words
+        env:
+          HF_HUB_DISABLE_XET: '1'
+        run: |
+          python - <<'PY'
+          from faster_whisper import WhisperModel
+          import pathlib,json
+          model=WhisperModel('small',device='cpu',compute_type='int8',cpu_threads=4)
+          out=pathlib.Path('alignment');out.mkdir()
+          for p in sorted(pathlib.Path('audio').glob('*.mp3')):
+              segments,info=model.transcribe(str(p),language='ja',beam_size=5,word_timestamps=True,vad_filter=False)
+              rows=[]
+              for s in segments:
+                  rows.append({'start':s.start,'end':s.end,'text':s.text,'words':[{'word':w.word,'start':w.start,'end':w.end,'probability':w.probability} for w in (s.words or [])]})
+              (out/(p.stem+'.json')).write_text(json.dumps({'duration':info.duration,'segments':rows},ensure_ascii=False,indent=2))
+              print(p.stem,' '.join(x['text'] for x in rows),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b001-aligned-words
+          path: alignment/
+          retention-days: 1
+          if-no-files-found: error
+      - name: Additional observed foreground example
+        run: |
+          python - <<'PY'
+          import urllib.request,pathlib,json,hashlib
+          import numpy as np,healpy as hp
+          from astropy.io import fits
+          out=pathlib.Path('foreground');out.mkdir()
+          url='https://lambda.gsfc.nasa.gov/data/map/dr5/skymaps/9yr/smoothed/wmap_band_smth_iqumap_r9_9yr_K_v5.fits'
+          p=out/'kband.fits'
+          with urllib.request.urlopen(url,timeout=90) as r: p.write_bytes(r.read())
+          with fits.open(p) as h:
+              a=np.asarray(h[1].data.field(0),dtype=float).flatten()
+              unit=h[1].header.get('TUNIT1','unknown'); ordering=h[1].header.get('ORDERING','NESTED')
+          l,b=np.meshgrid(np.linspace(-np.pi,np.pi,2048,endpoint=False),np.linspace(np.pi/2,-np.pi/2,1024))
+          image=hp.get_interp_val(a,np.pi/2-b,l%(2*np.pi),nest=ordering.strip().upper()=='NESTED')
+          np.save(out/'kband_latlon.npy',image.astype('float32'))
+          (out/'metadata.json').write_text(json.dumps({'source':url,'unit':unit,'ordering':ordering,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()},indent=2))
+          p.unlink()
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b001-foreground-data
+          path: foreground/
+          retention-days: 1
+          if-no-files-found: error
