@@ -18,7 +18,6 @@ jobs:
           python -m pip download --only-binary=:all: --no-deps moderngl glcontext -d out/wheels
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out private/key.pem 2>/dev/null
           openssl pkey -in private/key.pem -pubout -out out/public.pem
-          cat out/public.pem
       - name: Obtain and resample official WMAP data
         run: |
           python -m pip install numpy astropy healpy
@@ -28,13 +27,11 @@ jobs:
           import healpy as hp
           from astropy.io import fits
           out=pathlib.Path('out'); (out/'wmap').mkdir()
-          url='https://lambda.gsfc.nasa.gov/data/map/dr5/dfp/wmap_ilc_9yr_v5.fits'
+          url='https://lambda.gsfc.nasa.gov/data/map/dr5/dfp/ilc/wmap_ilc_9yr_v5.fits'
           target=out/'wmap/wmap_ilc_9yr_v5.fits'
-          urllib.request.urlretrieve(url,target)
+          with urllib.request.urlopen(url,timeout=90) as r: target.write_bytes(r.read())
           with fits.open(target) as h:
-              print(h.info())
               header=str(h[1].header)
-              print(header)
               data=np.asarray(h[1].data.field(0),dtype=np.float64).flatten()
               unit=h[1].header.get('TUNIT1','unknown')
               ordering=h[1].header.get('ORDERING','NESTED')
@@ -49,12 +46,14 @@ jobs:
           print(meta)
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: b001-prepared-assets
           path: out/
           retention-days: 1
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: b001-private-transfer-key
           path: private/
