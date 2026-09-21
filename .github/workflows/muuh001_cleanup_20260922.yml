@@ -1,0 +1,18 @@
+name: MUUH001 transfer cleanup
+on:
+  push:
+    paths: ['.github/workflows/muuh001_cleanup_20260922.yml']
+permissions:
+  contents: read
+  actions: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Delete this production task's temporary transfer key
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method DELETE repos/GunungApi/Codex/actions/artifacts/10659643467
+          echo 'Removed MUUH001 transfer key artifact 10659643467.'
