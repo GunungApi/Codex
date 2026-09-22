@@ -1,0 +1,48 @@
+name: MUUH002 v3 public playback recovery
+on:
+  push:
+    paths: ['.github/workflows/muuh002_v3_public_pages_20260922.yml']
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Read generated public playback pages
+        run: |
+          python -m pip install requests beautifulsoup4
+          python - <<'PY'
+          import requests,pathlib,json,re,html,urllib.parse
+          out=pathlib.Path('recovered');out.mkdir()
+          items={'intro':'0c8c2ac4b8a2404dae2ff11f9943a9db','earth_structure':'ed930b3099394989a3bf91e3d4e0a205','muscle_compare':'131eb967c04c4a90ac4773437161fcf8','earth_nerve':'0545ccd3b2f344d08aa753fa3c3d9d1d'}
+          report=[]
+          for name,context in items.items():
+              url='https://www.aidocmaker.com/g0/audio?name='+context
+              r=requests.get(url,timeout=35)
+              rec={'name':name,'status':r.status_code,'type':r.headers.get('content-type'),'length':len(r.content)}
+              if r.ok and ('audio/' in r.headers.get('content-type','') or r.content[:3]==b'ID3'):
+                  (out/(name+'.mp3')).write_bytes(r.content);rec['audio']=True
+              else:
+                  text=r.text.replace('\\/','/');(out/(name+'.html')).write_text(text)
+                  candidates=re.findall(r'https://[^\s<>\"\']+\.mp3(?:\?[^\s<>\"\']*)?',html.unescape(text))
+                  rec['candidate_count']=len(candidates)
+                  for link in candidates:
+                      p=urllib.parse.urlparse(link)
+                      if p.hostname not in ['storage.googleapis.com','www.aidocmaker.com','aidocmaker.com']:continue
+                      print('::add-mask::'+link)
+                      a=requests.get(link,timeout=35)
+                      if a.ok and len(a.content)>5000:
+                          (out/(name+'.mp3')).write_bytes(a.content);rec['audio']=True;break
+              report.append(rec);print(json.dumps(rec))
+          (out/'report.json').write_text(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muuh002-v3-public-page-results
+          path: recovered/
+          retention-days: 2
+          if-no-files-found: error
