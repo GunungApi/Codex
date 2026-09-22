@@ -1,0 +1,54 @@
+name: MUUH002 clarified cellular narration
+on:
+  push:
+    paths: ['.github/workflows/muuh002_audio02_fix_20260922.yml']
+permissions:
+  contents: read
+  actions: write
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: muuh002-transfer-key
+          run-id: 35674676179
+          github-token: ${{ github.token }}
+          path: private
+      - run: python -m pip -q install cryptography faster-whisper
+      - name: Recover generated audio and recognize the replacement
+        shell: python
+        run: |
+          import base64,json,pathlib,hashlib,urllib.request
+          from cryptography.hazmat.primitives.serialization import load_pem_private_key
+          from cryptography.hazmat.primitives.asymmetric import padding
+          from cryptography.hazmat.primitives import hashes
+          from faster_whisper import WhisperModel
+          enc='IRLOnTrE5+3EihqNgSCWFWIuFU3xpVTKv/GF9yh+JH5aj50BpMWBSaBbygBzxYPD82hTRQbq4tdfA2ai8jY7xsYwY5JoIDr9ESC4W3IPqPFlQzoUYkAupSlgaVbVdbVE77Rg6c5nPePeZj3KJ14iQ7KD6pTAlfZLq6p8gRUNA2IqOesN9mkehCGdqleWz6GL8uBa5Yy97EHEQkuLCDPRT4aErf/X1w2Nn//FaGrnZ0djRR2OkzO3g09faLwFV39rgPrtOWX0BBoaAslYkHE3raWtekCTsvr2YIVTh2cbbYo8pVOgi5aMuyvxIDzneBrPdNtpEaEEXjyk1OPQs4NQC/aeXpGxHzHToUI/d11hbUMZN9kreE4ZhWc7ugPUzCRjpdij4dzZWERuU5JRDOKK6CFN01GncjrxPW8CGUXgRV6DIxIxZcdLjmR/kjvaWkxavw/nIGJIfki/awaK3eDUyYGIUtVWDr4equX5PYLRV9/kLaqqvLqkDtUF59+kyE2L'
+          k=load_pem_private_key(pathlib.Path('private/key.pem').read_bytes(),None)
+          u=k.decrypt(base64.b64decode(enc),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None)).decode()
+          try: data=urllib.request.urlopen(u,timeout=60).read()
+          except Exception: raise RuntimeError('Replacement audio retrieval failed') from None
+          out=pathlib.Path('replacement');out.mkdir();(out/'02.mp3').write_bytes(data)
+          pathlib.Path('private/key.pem').unlink()
+          m=WhisperModel('medium',device='cpu',compute_type='int8',cpu_threads=4)
+          segs,info=m.transcribe(str(out/'02.mp3'),language='ja',beam_size=7,word_timestamps=True)
+          rows=[]
+          for s in segs:
+              rows.append({'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word} for w in s.words]})
+          (out/'02.json').write_text(json.dumps({'duration':info.duration,'segments':rows,'model':'medium'},ensure_ascii=False,indent=2))
+          (out/'manifest.json').write_text(json.dumps({'segment':2,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}))
+          print(json.dumps(rows,ensure_ascii=False))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muuh002-clarified-segment02
+          path: replacement/
+          retention-days: 3
+      - name: Delete this replacement's transfer-key artifact
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.deleteArtifact({owner:context.repo.owner,repo:context.repo.repo,artifact_id:10672299967});
+            core.info('Replacement transfer key removed.');
