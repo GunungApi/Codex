@@ -16,6 +16,11 @@ jobs:
           run-id: 35772217272
           github-token: ${{ github.token }}
           path: private
+      - name: Install audio tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip -q install faster-whisper
       - name: Decode and verify audio
         env:
           ENCRYPTED_URL: jRtPeVKe/KYgF01q+mkCrLlTlr/QL5wa7CE93BQsPUApHFsZ6AjdjuQ+hxVAht2WUgh2Qf64w0v+hIhyp+cFku5avjRZP54fP9WJhhqOtzl5KOeHZmnP8/lTy5hkeVskzX8iMVOEFPcznd/isjr7NLLxX3u5TTcTl4yQZS4Dd1rk2IpbzQAYPmkXnn2y4QF/G/ljsbCIjvEFfY82HwmIswIYT8rL8kMUYxzlwXA9IuMmseHjKscJ05wT3rNHJsRko77urh/VMoXz9QEpgAhRJXu+XZp/zpgxc8Bh34cfISA8QGGCj6MgDotPdFnC8iXeG54lxH6zeE3eYPtKu7d5CVgixZI375LnOOb9t7t0qQtK19aZXw96UXcZR1ar6BiUdzfMLeR5Tw5Nx5yPIZfQ/ihKeRlFDitu2Y3hZgZxBGwC3RZYNerh4aMm3wdtsCsfwitZz3ynhZ4xIDdcJwWlh5qXlnCWtoJgqi+SYpZAFGiU/sOFwWIQ8cGmgIHodq4J
@@ -32,7 +37,6 @@ jobs:
           PY
           ffmpeg -v error -i recovered/test.mp3 -ar 48000 -ac 1 recovered/test.wav
           ffprobe -v error -show_format -show_streams -of json recovered/test.mp3 > recovered/probe.json
-          python -m pip -q install faster-whisper
           python - <<'PY'
           from faster_whisper import WhisperModel
           import json,pathlib
@@ -43,6 +47,7 @@ jobs:
           print(json.dumps(out,ensure_ascii=False))
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: p011-audio-test
           path: recovered/
