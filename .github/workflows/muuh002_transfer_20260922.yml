@@ -1,0 +1,22 @@
+name: MUUH002 protected transfer setup
+on:
+  push:
+    paths: ['.github/workflows/muuh002_transfer_20260922.yml']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Generate temporary transfer key
+        run: |
+          mkdir -p private
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out private/key.pem 2>/dev/null
+          openssl pkey -in private/key.pem -pubout -out public.pem
+          cat public.pem
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muuh002-transfer-key
+          path: private/
+          retention-days: 1
