@@ -1,4 +1,4 @@
-name: MUUH003 narration and rendering dependencies
+name: MUUH003 completed public narration recovery
 on:
   push:
     paths: ['.github/workflows/muuh003_assets_20260922.yml']
@@ -12,57 +12,58 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Download rendering wheels for the editing environment
-        run: |
-          mkdir -p wheels
-          python -m pip download --only-binary=:all: --python-version 3.13 --platform manylinux2014_x86_64 --implementation cp --abi cp313 -d wheels moderngl==5.12.0 glcontext==3.0.0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: muuh003-render-wheels
-          path: wheels/
-          retention-days: 2
-      - name: Prepare normal public playback reader
+      - name: Prepare public playback reader
         run: |
           python -m pip install playwright faster-whisper
           python -m playwright install --with-deps chromium
-      - name: Retrieve the six generated public voiceovers
+      - name: Read the completed existing public voiceovers
         run: |
           python - <<'PY'
           from pathlib import Path
-          import json,hashlib,urllib.parse
-          from playwright.sync_api import sync_playwright
+          import asyncio,json,hashlib,urllib.parse,time
+          from playwright.async_api import async_playwright
           out=Path('audio');out.mkdir()
           ids=['21ebfd09d5554169b500a3df6acfba7e','c532b4cf7f824157a2dd3d1af2ea8150','cdb823b6558645c1a74a6f5d3efaa3e0','fe64ae8dc7c3444f902243e06875c65b','ff24b3a08df9498294c15abc6dbee910','d274dfd2b30b4422ab5bab96cc786506']
-          report=[]
-          with sync_playwright() as p:
-            browser=p.chromium.launch(headless=True)
-            for i,cid in enumerate(ids,1):
-              page=browser.new_page();target=out/f'{i:02d}.mp3'
-              def receive(r):
-                try:
-                  host=urllib.parse.urlparse(r.url).hostname or ''
-                  if (host.endswith('aidocmaker.com') or host=='storage.googleapis.com') and 'audio/' in r.headers.get('content-type',''):
-                    data=r.body()
-                    if 5000<len(data)<10000000:target.write_bytes(data)
-                except Exception:pass
-              page.on('response',receive)
-              page.goto('https://www.aidocmaker.com/g0/audio?name='+cid,wait_until='networkidle',timeout=60000)
-              page.wait_for_timeout(2500)
-              sources=page.locator('audio,video,source').evaluate_all('(els)=>els.map(e=>e.currentSrc||e.src).filter(Boolean)')
-              for u in sources:
-                q=urllib.parse.urlparse(u)
-                if q.scheme=='https' and (q.hostname=='storage.googleapis.com' or (q.hostname or '').endswith('aidocmaker.com')):
-                  r=page.request.get(u)
-                  if r.ok:
-                    data=r.body()
-                    if 5000<len(data)<10000000:target.write_bytes(data)
-              body=page.locator('body').inner_text()
-              (out/f'{i:02d}_page.txt').write_text(body)
-              report.append({'part':i,'retrieved':target.exists(),'bytes':target.stat().st_size if target.exists() else 0,'sha256':hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None})
-              page.close()
-            browser.close()
-          (out/'retrieval.json').write_text(json.dumps(report,indent=2));print(json.dumps(report))
-          if not all(x['retrieved'] for x in report):raise SystemExit('Some narration parts unavailable; no substitute voice used.')
+          async def recover(browser,i,cid):
+            page=await browser.new_page();target=out/f'{i:02d}.mp3';events=[]
+            async def receive(r):
+              try:
+                host=urllib.parse.urlparse(r.url).hostname or ''
+                if not(host.endswith('aidocmaker.com') or host=='storage.googleapis.com'):return
+                ct=r.headers.get('content-type','')
+                events.append({'host':host,'path':urllib.parse.urlparse(r.url).path,'type':ct,'status':r.status})
+                if 'audio/' in ct:
+                  data=await r.body()
+                  if 5000<len(data)<10000000:target.write_bytes(data)
+              except Exception:pass
+            page.on('response',receive)
+            try:
+              await page.goto('https://www.aidocmaker.com/g0/audio?name='+cid,wait_until='domcontentloaded',timeout=60000)
+              for attempt in range(45):
+                await page.wait_for_timeout(2000)
+                sources=await page.locator('audio,video,source').evaluate_all('(els)=>els.map(e=>e.currentSrc||e.src).filter(Boolean)')
+                if sources:
+                  for u in sources:
+                    q=urllib.parse.urlparse(u)
+                    if q.scheme=='https' and (q.hostname=='storage.googleapis.com' or (q.hostname or '').endswith('aidocmaker.com')):
+                      r=await page.request.get(u)
+                      if r.ok:
+                        data=await r.body()
+                        if 5000<len(data)<10000000:target.write_bytes(data)
+                if target.exists():break
+              (out/f'{i:02d}_page.txt').write_text(await page.locator('body').inner_text())
+              (out/f'{i:02d}_requests.json').write_text(json.dumps(events,indent=2))
+            except Exception as e:(out/f'{i:02d}_error.txt').write_text(str(e))
+            await page.close()
+            return {'part':i,'retrieved':target.exists(),'bytes':target.stat().st_size if target.exists() else 0,'sha256':hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None}
+          async def main():
+            async with async_playwright() as p:
+              browser=await p.chromium.launch(headless=True)
+              report=await asyncio.gather(*[recover(browser,i,cid) for i,cid in enumerate(ids,1)])
+              await browser.close()
+            (out/'retrieval.json').write_text(json.dumps(report,indent=2));print(json.dumps(report))
+            if not all(x['retrieved'] for x in report):raise SystemExit('Some narration media is unavailable; no alternate voice adopted.')
+          asyncio.run(main())
           PY
       - uses: actions/upload-artifact@v4
         if: always()
