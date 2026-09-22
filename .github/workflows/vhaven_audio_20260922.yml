@@ -19,11 +19,11 @@ jobs:
           path: private
           run-id: 35710149644
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Retrieve eight generated narration clips
+      - name: Retrieve and decode eight generated narration clips
         run: |
           python -m pip install requests cryptography faster-whisper soundfile
           python - <<'PY'
-          import pathlib,base64,requests,uuid,json,subprocess,hashlib
+          import pathlib,base64,requests,uuid,json,hashlib,av
           from cryptography.hazmat.primitives import serialization,hashes
           from cryptography.hazmat.primitives.asymmetric import padding
           key=serialization.load_pem_private_key(pathlib.Path('private/key.pem').read_bytes(),password=None)
@@ -39,11 +39,15 @@ jobs:
               r=requests.get(url,timeout=45,allow_redirects=False);r.raise_for_status()
               assert 2000<len(r.content)<10000000
               p=out/f'{i:02}.mp3';p.write_bytes(r.content)
-              probe=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_format','-show_streams','-of','json',str(p)]))
-              subprocess.run(['ffmpeg','-v','error','-i',str(p),'-f','null','-'],check=True)
-              report.append({'clip':i,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'probe':probe})
+              with av.open(str(p)) as container:
+                  frames=list(container.decode(audio=0))
+                  assert frames
+                  sr=frames[0].sample_rate
+                  samples=sum(f.samples for f in frames)
+                  assert samples>sr
+              report.append({'clip':i,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'sample_rate':sr,'decoded_samples':samples,'decoded_duration':samples/sr})
           (out/'recovery.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
-          print('All clips recovered and decoded')
+          print('All clips recovered and fully decoded with PyAV')
           PY
       - uses: actions/upload-artifact@v4
         with:
