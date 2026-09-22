@@ -1,0 +1,49 @@
+name: P010 opening pronunciation correction
+on:
+  push:
+    paths: ['.github/workflows/p010_pronunciation_20260922.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: vhaven-transfer-key
+          path: private
+          run-id: 35710149644
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Retrieve original and transcribe without prompting
+        run: |
+          pip install cryptography requests faster-whisper
+          python - <<'PY'
+          from cryptography.hazmat.primitives import serialization,hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          from faster_whisper import WhisperModel
+          import pathlib,base64,requests,json,uuid
+          key=serialization.load_pem_private_key(pathlib.Path('private/key.pem').read_bytes(),password=None)
+          encrypted='fhtDNsxBMV79zempVQjW/PP0v2vAHALdUAPNfb7vnqWLGIiVX8OKFXV+yKshYQ1TVVTIneVpAkScZuFymm/0pLRjw1qH5F9H40SLAMHb7C+XCZVJGTVm0KdRD58l0zEwKcIABCVflqLDLEAB/qQwDJXReHd1j1+AZ8aOQBg+0Tk3nraVEA2O5B8d6BLlHJ4qBWzyOM98q9HR0F96UeUTI1Wzl+l0NaRBpYDPzhyyJ2OMNTbF+Rkb9SxiDvk90YM2SbIlESMEooceJxGlBygpQI0dgKDcIWBLsFmYXTVxzUFgQyonSO8Ar36mXCPGcW+E1+yEg6MxQKr42hUHxqw08PQ5qSrhETgFdvGlvRZ8fLEh39TNRNNZlT38nt4VBweZN8pn/z0bN823e2n0tBMlUvLaEKc04ydEwjSIQPUu4KskiJ7wsQOjNUr89FQyAvoFdXxCAWtKOpySbNrkN3Y8dfSrbAPr/W846Vt4q255f17P2lTQyQQGAJPqpwHw2lvy'
+          item=key.decrypt(base64.b64decode(encrypted),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None)).decode()
+          assert str(uuid.UUID(item))==item
+          url='https://storage.googleapis.com/adm--audio-playback--7d--public/mcp-preview/'+item+'.mp3'
+          print('::add-mask::'+url)
+          r=requests.get(url,timeout=45,allow_redirects=False);r.raise_for_status()
+          out=pathlib.Path('corrected');out.mkdir();p=out/'01_corrected.mp3';p.write_bytes(r.content)
+          model=WhisperModel('medium',device='cpu',compute_type='int8',cpu_threads=4)
+          segments,info=model.transcribe(str(p),language='ja',beam_size=5,word_timestamps=True,vad_filter=False,condition_on_previous_text=False)
+          data=[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in (s.words or [])]} for s in segments]
+          (out/'01_corrected.json').write_text(json.dumps(data,ensure_ascii=False,indent=2))
+          print(' '.join(s['text'] for s in data))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p010-opening-corrected
+          path: corrected/
+          retention-days: 7
+          if-no-files-found: error
