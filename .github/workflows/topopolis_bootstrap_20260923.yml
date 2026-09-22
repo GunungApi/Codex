@@ -1,0 +1,36 @@
+name: Topopolis isolated production bootstrap
+on:
+  push:
+    paths: ['.github/workflows/topopolis_bootstrap_20260923.yml']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Prepare renderer wheels and temporary transfer key
+        run: |
+          mkdir -p wheels private public
+          python -m pip download --dest wheels --only-binary=:all: --python-version 313 --implementation cp --abi cp313 --platform manylinux2014_x86_64 moderngl glcontext
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out private/key.pem 2>/dev/null
+          openssl pkey -in private/key.pem -pubout -out public/key.pub
+          cat public/key.pub
+      - uses: actions/upload-artifact@v4
+        with:
+          name: topopolis-renderer-wheels
+          path: wheels/
+          retention-days: 2
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: topopolis-transfer-key
+          path: private/key.pem
+          retention-days: 1
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: topopolis-public-key
+          path: public/key.pub
+          retention-days: 1
+          if-no-files-found: error
