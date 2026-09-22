@@ -15,31 +15,29 @@ jobs:
       - run: |
           python -m pip install playwright faster-whisper
           python -m playwright install --with-deps chromium
-      - name: Recover the existing generated audio from its public player
+      - name: Recover the new simplified narration from its public player
         run: |
           python - <<'PY'
           from pathlib import Path
-          import urllib.parse,json,hashlib
+          import urllib.parse,json
           from playwright.sync_api import sync_playwright
           out=Path('result');out.mkdir()
           with sync_playwright() as p:
               browser=p.chromium.launch(headless=True);page=browser.new_page()
-              page.goto('https://www.aidocmaker.com/g0/audio?name=80bcdff5d8ee4a3a994346c43c354659',wait_until='networkidle',timeout=60000)
+              page.goto('https://www.aidocmaker.com/g0/audio?name=2fa8bb1876834a7eb403064806e7f5c4',wait_until='networkidle',timeout=60000)
+              page.wait_for_timeout(5000)
+              sources=page.locator('audio,video,source').evaluate_all('(els)=>els.map(e=>e.currentSrc||e.src).filter(Boolean)')
               found=False
-              for attempt in range(4):
-                  page.wait_for_timeout(5000)
-                  sources=page.locator('audio,video,source').evaluate_all('(els)=>els.map(e=>e.currentSrc||e.src).filter(Boolean)')
-                  for url in sources:
-                      u=urllib.parse.urlparse(url)
-                      if u.scheme!='https' or not (u.hostname=='storage.googleapis.com' or u.hostname.endswith('aidocmaker.com')):continue
-                      r=page.request.get(url)
-                      if not r.ok:continue
-                      data=r.body()
-                      if not 5000<len(data)<10000000:continue
-                      (out/'nerve_compare_final.mp3').write_bytes(data);found=True;break
-                  if found:break
+              for url in sources:
+                  u=urllib.parse.urlparse(url)
+                  if u.scheme!='https' or not (u.hostname=='storage.googleapis.com' or u.hostname.endswith('aidocmaker.com')):continue
+                  r=page.request.get(url)
+                  if not r.ok:continue
+                  data=r.body()
+                  if not 5000<len(data)<10000000:continue
+                  (out/'nerve_compare_final.mp3').write_bytes(data);found=True;break
               (out/'page.txt').write_text(page.locator('body').inner_text())
-              browser.close();assert found,'No audio available in normal public player'
+              browser.close();assert found,'No audio available in this public player'
           from faster_whisper import WhisperModel
           model=WhisperModel('medium',device='cpu',compute_type='int8',cpu_threads=4)
           segments,info=model.transcribe(str(out/'nerve_compare_final.mp3'),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
