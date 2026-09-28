@@ -1,0 +1,76 @@
+name: Astrophage narration preparation
+on:
+  push:
+    paths: ['.github/workflows/astrophage_voice_20260928.yml']
+permissions:
+  contents: read
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Obtain the commissioned public voice recordings
+        run: |
+          python -m pip -q install playwright requests av faster-whisper
+          python -m playwright install --with-deps chromium >/dev/null 2>&1
+          mkdir -p audio
+          python - <<'PY'
+          from pathlib import Path
+          import requests, json, hashlib, urllib.parse
+          import av
+          from playwright.sync_api import sync_playwright
+          # Stable public playback-page IDs, not temporary audio URLs or credentials.
+          ids=['fb7d5df2b36045a0a184fd73e9ede1e5','f5b959771ebb4bfb90f6b909006f0682','bf63ad5ee3cf4c6c97491a696c9ac3b9','3022556552aa42b481c08d9bc75b9a59','c9c146f95b7a43c9b4522ea509bfdeb1']
+          records=[]
+          with sync_playwright() as pw:
+              browser=pw.chromium.launch(headless=True)
+              for i,cid in enumerate(ids,1):
+                  page=browser.new_page()
+                  page.goto('https://www.aidocmaker.com/g0/audio?name='+cid,wait_until='domcontentloaded',timeout=90000)
+                  src=None
+                  for attempt in range(60):
+                      resources=page.locator('audio, audio source').evaluate_all('(xs)=>xs.map(x=>x.currentSrc||x.src).filter(Boolean)')
+                      if resources:
+                          src=resources[0];break
+                      page.wait_for_timeout(1000)
+                  assert src, 'No public audio element exposed'
+                  u=urllib.parse.urlparse(src)
+                  assert u.scheme=='https' and u.netloc=='storage.googleapis.com'
+                  print('::add-mask::'+src)
+                  response=requests.get(src,timeout=60);response.raise_for_status()
+                  assert 1000<len(response.content)<10000000
+                  out=Path('audio',f'{i:02}.mp3');out.write_bytes(response.content)
+                  media=av.open(str(out));duration=media.duration/av.time_base
+                  decoded=sum(1 for frame in media.decode(audio=0))
+                  assert duration>3 and decoded>20
+                  records.append({'file':out.name,'duration':duration,'decoded_frames':decoded,'bytes':len(response.content),'sha256':hashlib.sha256(response.content).hexdigest()})
+                  print('Recovered',out.name,duration,'seconds')
+                  page.close()
+              browser.close()
+          Path('audio/retrieval.json').write_text(json.dumps(records,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: astrophage-original-voice
+          path: audio/
+          retention-days: 1
+      - name: Derive word timings from the actual Japanese recordings
+        run: |
+          python - <<'PY'
+          import pathlib,json
+          from faster_whisper import WhisperModel
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(pathlib.Path('audio').glob('*.mp3')):
+              segments,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              data={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segments]}
+              p.with_suffix('.json').write_text(json.dumps(data,ensure_ascii=False,indent=2))
+              print(p.name,[s['text'] for s in data['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: astrophage-aligned-voice
+          path: audio/
+          retention-days: 1
