@@ -1,4 +1,4 @@
-name: PHYS004 encrypted media transfer
+name: PHYS004 narration refinement
 on:
   push:
     paths: ['.github/workflows/phys004_narration_20260929_v1.yml']
@@ -7,71 +7,61 @@ permissions:
 jobs:
   recover:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 15
     steps:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Generate a one-use transfer key
+      - name: Generate one-use transfer key
         run: |
           python -m pip -q install cryptography requests av faster-whisper
-          mkdir -p transfer_public narration
+          mkdir -p transfer_public refined
           python - <<'PY'
           from pathlib import Path
           from cryptography.hazmat.primitives.asymmetric import rsa
           from cryptography.hazmat.primitives import serialization
           key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
-          Path('/tmp/phys004-transfer-private.pem').write_bytes(key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()))
+          Path('/tmp/phys004-private.pem').write_bytes(key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()))
           Path('transfer_public/public.pem').write_bytes(key.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: phys004-transfer-public-key
+          name: phys004-refinement-public-key
           path: transfer_public/public.pem
           retention-days: 1
-      - name: Receive encrypted media manifest and recover commissioned clips
+      - name: Recover clarified sentence and align words
         run: |
           python - <<'PY'
           from pathlib import Path
-          import requests,json,base64,time,urllib.parse,hashlib,av,os
+          import requests,json,base64,time,urllib.parse,hashlib,av
           from cryptography.hazmat.primitives import serialization,hashes
           from cryptography.hazmat.primitives.asymmetric import padding
           from cryptography.hazmat.primitives.ciphers.aead import AESGCM
           from faster_whisper import WhisperModel
-          path=Path('/tmp/phys004-transfer-private.pem')
-          key=serialization.load_pem_private_key(path.read_bytes(),password=None)
-          request_url='https://raw.githubusercontent.com/GunungApi/Codex/main/phys004_transfer_request.json'
-          manifest=None
-          for attempt in range(72):
-              r=requests.get(request_url+'?transfer='+str(time.time_ns()),timeout=20)
+          path=Path('/tmp/phys004-private.pem');key=serialization.load_pem_private_key(path.read_bytes(),password=None);manifest=None
+          for attempt in range(90):
+              r=requests.get('https://raw.githubusercontent.com/GunungApi/Codex/main/phys004_refinement_request.json?transfer='+str(time.time_ns()),timeout=20)
               if r.status_code==200:
                   try:
                       d=r.json();session=key.decrypt(base64.b64decode(d['key']),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
-                      manifest=json.loads(AESGCM(session).decrypt(base64.b64decode(d['nonce']),base64.b64decode(d['payload']),b'PHYS004'))
-                      break
+                      manifest=json.loads(AESGCM(session).decrypt(base64.b64decode(d['nonce']),base64.b64decode(d['payload']),b'PHYS004'));break
                   except Exception:pass
               time.sleep(5)
-          assert manifest and len(manifest)==6,'Encrypted manifest not received'
-          records=[]
-          for i,item in enumerate(manifest,1):
-              src=item['url'];u=urllib.parse.urlparse(src)
-              assert u.scheme=='https' and u.netloc=='storage.googleapis.com' and u.path.startswith('/adm--audio-playback--7d--public/mcp-preview/') and u.path.endswith('.mp3')
-              print('::add-mask::'+src)
-              r=requests.get(src,timeout=60);r.raise_for_status();assert len(r.content)<5000000
-              p=Path('narration',f'{i:02d}.mp3');p.write_bytes(r.content)
-              a=av.open(str(p));duration=a.duration/av.time_base;decoded=sum(1 for f in a.decode(audio=0));assert 2<duration<30 and decoded>10
-              records.append({'file':p.name,'context_id':item['context_id'],'duration':duration,'sha256':hashlib.sha256(r.content).hexdigest(),'bytes':len(r.content),'decoded_frames':decoded,'source':'tool-generated full-transcript preview','transfer':'RSA-OAEP / AES-GCM; private key deleted'})
+          assert manifest and len(manifest)==1
+          item=manifest[0];src=item['url'];u=urllib.parse.urlparse(src)
+          assert u.scheme=='https' and u.netloc=='storage.googleapis.com' and u.path.startswith('/adm--audio-playback--7d--public/mcp-preview/') and u.path.endswith('.mp3')
+          print('::add-mask::'+src);r=requests.get(src,timeout=60);r.raise_for_status();assert len(r.content)<5000000
+          p=Path('refined/04.mp3');p.write_bytes(r.content);a=av.open(str(p));duration=a.duration/av.time_base;decoded=sum(1 for f in a.decode(audio=0));assert 2<duration<30 and decoded>10
+          Path('refined/retrieval_refined.json').write_text(json.dumps({'file':p.name,'context_id':item['context_id'],'duration':duration,'sha256':hashlib.sha256(r.content).hexdigest(),'bytes':len(r.content),'decoded_frames':decoded,'source':'full-transcript preview','transfer':'RSA-OAEP/AES-GCM'},indent=2))
           path.unlink();del key,manifest
-          Path('narration/retrieval.json').write_text(json.dumps(records,indent=2))
           model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
-          for p in sorted(Path('narration').glob('*.mp3')):
-              segments,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
-              d={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segments]}
-              p.with_name(p.stem+'_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2));print(p.name,info.duration,[s['text'] for s in d['segments']])
+          segments,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+          d={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segments]}
+          Path('refined/04_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2));print(p.name,info.duration,[s['text'] for s in d['segments']])
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: phys004-recovered-narration-v1
-          path: narration/
+          name: phys004-refined-narration-v1
+          path: refined/
           retention-days: 1
