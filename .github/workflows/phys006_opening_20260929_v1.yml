@@ -1,0 +1,68 @@
+name: PHYS006 opening refinement
+on:
+  push:
+    paths: ['.github/workflows/phys006_opening_20260929_v1.yml']
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prepare ephemeral key
+        run: |
+          python -m pip -q install cryptography requests av faster-whisper
+          mkdir -p transfer refined
+          python - <<'PY'
+          from pathlib import Path
+          from cryptography.hazmat.primitives.asymmetric import rsa
+          from cryptography.hazmat.primitives import serialization as s
+          k=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+          Path('transfer/private.pem').write_bytes(k.private_bytes(s.Encoding.PEM,s.PrivateFormat.PKCS8,s.NoEncryption()))
+          Path('transfer/public.pem').write_bytes(k.public_key().public_bytes(s.Encoding.PEM,s.PublicFormat.SubjectPublicKeyInfo))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phys006-opening-public-key
+          path: transfer/public.pem
+          retention-days: 1
+      - name: Recover and align one replacement sentence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os,time,json,base64 as b,hashlib,urllib.parse,requests,av
+          from cryptography.hazmat.primitives import serialization as s,hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          from faster_whisper import WhisperModel
+          env=None
+          for i in range(140):
+              r=requests.get('https://api.github.com/repos/GunungApi/Codex/contents/phys006_opening_request_v1.json',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'},timeout=25)
+              if r.status_code==200: env=json.loads(b.b64decode(r.json()['content']));break
+              assert r.status_code==404
+              time.sleep(5)
+          assert env
+          k=s.load_pem_private_key(Path('transfer/private.pem').read_bytes(),password=None)
+          secret=k.decrypt(b.b64decode(env['key']),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
+          source=json.loads(AESGCM(secret).decrypt(b.b64decode(env['nonce']),b.b64decode(env['payload']),None))['01']
+          Path('transfer/private.pem').unlink()
+          u=urllib.parse.urlparse(source);assert u.scheme=='https' and u.netloc=='storage.googleapis.com' and '/mcp-preview/' in u.path
+          print('::add-mask::'+source)
+          r=requests.get(source,timeout=75);r.raise_for_status();p=Path('refined/01.mp3');p.write_bytes(r.content)
+          a=av.open(str(p));duration=a.duration/av.time_base;count=sum(1 for f in a.decode(audio=0));assert 3<duration<20 and count>10
+          Path('refined/retrieval_refined.json').write_text(json.dumps({'file':p.name,'duration':duration,'sha256':hashlib.sha256(r.content).hexdigest(),'decoded_frames':count},indent=2))
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          segs,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+          data={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':z.start,'end':z.end,'text':z.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in z.words]} for z in segs]}
+          Path('refined/01_words.json').write_text(json.dumps(data,ensure_ascii=False,indent=2));print([z['text'] for z in data['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phys006-refined-opening-v1
+          path: refined/
+          retention-days: 1
