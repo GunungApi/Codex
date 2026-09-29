@@ -1,0 +1,80 @@
+name: PHYS005 third-edition clarification
+on:
+  push:
+    paths: ['.github/workflows/phys005_v3_clarification_20260929.yml']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Generate one-use media transfer key
+        run: |
+          python -m pip -q install cryptography requests av faster-whisper
+          mkdir -p transfer narration
+          python - <<'PY'
+          from pathlib import Path
+          from cryptography.hazmat.primitives.asymmetric import rsa
+          from cryptography.hazmat.primitives import serialization
+          k=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+          Path('transfer/private.pem').write_bytes(k.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()))
+          Path('transfer/public.pem').write_bytes(k.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phys005-v3-public-key
+          path: transfer/public.pem
+          retention-days: 1
+      - name: Recover commissioned sentence and transcribe actual audio
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os,time,json,base64,hashlib,urllib.parse,requests,av
+          from cryptography.hazmat.primitives import serialization,hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          from faster_whisper import WhisperModel
+          endpoint='https://api.github.com/repos/GunungApi/Codex/contents/phys005_v3_transfer_request.json'
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
+          envelope=None
+          for i in range(120):
+              r=requests.get(endpoint,headers=headers,timeout=25)
+              if r.status_code==200:
+                  envelope=json.loads(base64.b64decode(r.json()['content']));break
+              if r.status_code!=404:raise RuntimeError('Manifest HTTP '+str(r.status_code))
+              time.sleep(5)
+          assert envelope,'Transfer manifest unavailable'
+          k=serialization.load_pem_private_key(Path('transfer/private.pem').read_bytes(),password=None)
+          secret=k.decrypt(base64.b64decode(envelope['key']),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
+          manifest=json.loads(AESGCM(secret).decrypt(base64.b64decode(envelope['nonce']),base64.b64decode(envelope['payload']),None))
+          Path('transfer/private.pem').unlink()
+          records=[]
+          for num,src in manifest.items():
+              assert num=='05'
+              u=urllib.parse.urlparse(src)
+              assert u.scheme=='https' and u.netloc=='storage.googleapis.com' and '/mcp-preview/' in u.path
+              print('::add-mask::'+src)
+              r=requests.get(src,timeout=75);r.raise_for_status()
+              p=Path('narration',num+'.mp3');p.write_bytes(r.content)
+              a=av.open(str(p));duration=a.duration/av.time_base;count=sum(1 for f in a.decode(audio=0))
+              assert 3<duration<25 and count>20
+              records.append({'file':p.name,'duration':duration,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'decoded_frames':count,'source':'tool-provided complete-sentence preview'})
+          Path('narration/retrieval.json').write_text(json.dumps(records,indent=2))
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in Path('narration').glob('*.mp3'):
+              segments,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              d={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segments]}
+              p.with_name(p.stem+'_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2));print([s['text'] for s in d['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phys005-v3-clarified-narration
+          path: narration/
+          retention-days: 1
