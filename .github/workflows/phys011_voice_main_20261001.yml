@@ -1,4 +1,4 @@
-name: PHYS011 main narration
+name: PHYS011 narration refinement
 on:
   push:
     paths: ['.github/workflows/phys011_voice_main_20261001.yml']
@@ -22,7 +22,7 @@ jobs:
           import requests,json,hashlib,urllib.parse,av
           from playwright.sync_api import sync_playwright
           from faster_whisper import WhisperModel
-          pages={'02':'35ac4bfe0ee741e38b5ee7d360d136d1','03':'e090b56fdca842daa965f6a3f4ddbe57','04':'3ea87f41943248e889ceb87cd0f343c9','05':'60f3e801e5f741d1a6ab82f73bd214c9','06':'ede67be8ae524fefabfb243757ad6fad'}
+          pages={'03':'671318f08589441082adfac7d9b72c3c','04':'52dbbe26557e458fac48a3f00a1c3281','05':'835c51fb5f4d4224a994e30e1bd4f42a'}
           records=[]
           with sync_playwright() as pw:
               browser=pw.chromium.launch(headless=True)
@@ -55,6 +55,6 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: phys011-main-narration
+          name: phys011-refined-narration
           path: narration/
           retention-days: 2
