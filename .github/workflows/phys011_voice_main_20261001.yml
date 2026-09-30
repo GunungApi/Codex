@@ -1,0 +1,60 @@
+name: PHYS011 main narration
+on:
+  push:
+    paths: ['.github/workflows/phys011_voice_main_20261001.yml']
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Recover commissioned voice and align words
+        run: |
+          python -m pip -q install playwright requests av faster-whisper
+          python -m playwright install --with-deps chromium >/dev/null 2>&1
+          mkdir -p narration
+          python - <<'PY'
+          from pathlib import Path
+          import requests,json,hashlib,urllib.parse,av
+          from playwright.sync_api import sync_playwright
+          from faster_whisper import WhisperModel
+          pages={'02':'35ac4bfe0ee741e38b5ee7d360d136d1','03':'e090b56fdca842daa965f6a3f4ddbe57','04':'3ea87f41943248e889ceb87cd0f343c9','05':'60f3e801e5f741d1a6ab82f73bd214c9','06':'ede67be8ae524fefabfb243757ad6fad'}
+          records=[]
+          with sync_playwright() as pw:
+              browser=pw.chromium.launch(headless=True)
+              for number,cid in pages.items():
+                  page=browser.new_page()
+                  page.goto('https://www.aidocmaker.com/g0/audio?name='+cid,wait_until='domcontentloaded',timeout=90000)
+                  sources=[]
+                  for attempt in range(70):
+                      sources=page.locator('audio, audio source').evaluate_all('(xs)=>xs.map(x=>x.currentSrc||x.src).filter(Boolean)')
+                      if sources:break
+                      page.wait_for_timeout(1000)
+                  assert sources,'No playable commissioned voice for '+number
+                  src=sources[0];u=urllib.parse.urlparse(src)
+                  assert u.scheme=='https' and u.netloc=='storage.googleapis.com'
+                  print('::add-mask::'+src)
+                  r=requests.get(src,timeout=60);r.raise_for_status()
+                  p=Path('narration',number+'.mp3');p.write_bytes(r.content)
+                  a=av.open(str(p));duration=a.duration/av.time_base;decoded=sum(1 for f in a.decode(audio=0))
+                  assert 2<duration<30 and decoded>10
+                  records.append({'file':p.name,'duration':duration,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'decoded_frames':decoded})
+                  page.close()
+              browser.close()
+          Path('narration/retrieval.json').write_text(json.dumps(records,indent=2))
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('narration').glob('*.mp3')):
+              segments,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              data={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segments]}
+              p.with_name(p.stem+'_words.json').write_text(json.dumps(data,ensure_ascii=False,indent=2))
+              print(p.name,info.duration,[s['text'] for s in data['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phys011-main-narration
+          path: narration/
+          retention-days: 2
