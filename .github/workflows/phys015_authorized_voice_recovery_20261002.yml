@@ -1,0 +1,62 @@
+name: PHYS015 approved narration recovery
+on:
+  push:
+    paths: ['.github/workflows/phys015_authorized_voice_recovery_20261002.yml']
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Retrieve six commissioned public voiceovers and align Japanese words
+        run: |
+          python -m pip -q install playwright requests av faster-whisper
+          python -m playwright install --with-deps chromium >/dev/null 2>&1
+          mkdir -p narration
+          python - <<'PY'
+          from pathlib import Path
+          import requests,json,urllib.parse,hashlib,av
+          from playwright.sync_api import sync_playwright
+          from faster_whisper import WhisperModel
+          # Owner explicitly approved this temporary recovery job in the current conversation.
+          # Only these six commissioned public playback pages are accessed. No account credentials.
+          pages={'01':'62a0957c001544bcba842ee153381271','02':'86c425bacc184f88a8235bc1ba3c88e5','03':'1a8f6dd990ec451eb1e557b986ac3b22','04':'b6f0bc591d4e41dfa7a4b507cf2f79c2','05':'1d1ca99c539749eb9f04fbae06e75868','06':'f34a7296a2854f6688e4975f54d01dba'}
+          records=[]
+          with sync_playwright() as pw:
+              browser=pw.chromium.launch(headless=True)
+              for number,cid in pages.items():
+                  page=browser.new_page()
+                  page.goto('https://www.aidocmaker.com/g0/audio?name='+cid,wait_until='domcontentloaded',timeout=90000)
+                  sources=[]
+                  for attempt in range(65):
+                      sources=page.locator('audio, audio source').evaluate_all('(xs)=>xs.map(x=>x.currentSrc||x.src).filter(Boolean)')
+                      if sources: break
+                      page.wait_for_timeout(1000)
+                  assert sources,'No playable source for '+number
+                  src=sources[0];u=urllib.parse.urlparse(src)
+                  assert u.scheme=='https' and u.netloc=='storage.googleapis.com'
+                  print('::add-mask::'+src)
+                  r=requests.get(src,timeout=60);r.raise_for_status()
+                  p=Path('narration',number+'.mp3');p.write_bytes(r.content)
+                  a=av.open(str(p));duration=a.duration/av.time_base;frames=sum(1 for x in a.decode(audio=0))
+                  assert 2<duration<30 and frames>10
+                  records.append({'file':p.name,'duration':duration,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'decoded_frames':frames})
+                  page.close()
+              browser.close()
+          Path('narration/retrieval.json').write_text(json.dumps(records,indent=2))
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('narration').glob('*.mp3')):
+              segments,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              d={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segments]}
+              p.with_name(p.stem+'_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2))
+              print(p.name,info.duration,[s['text'] for s in d['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phys015-approved-narration
+          path: narration/
+          retention-days: 2
