@@ -1,4 +1,4 @@
-name: PHYS013 narration refinement
+name: PHYS013 final torque definition
 on:
   push:
     paths: ['.github/workflows/phys013_refine_voice_20261002.yml']
@@ -12,43 +12,37 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Recover replacement sentences and align words
+      - name: Retrieve final definition and align words
         run: |
           python -m pip -q install playwright requests faster-whisper
           python -m playwright install --with-deps chromium >/dev/null 2>&1
-          mkdir -p refined
+          mkdir -p final
           python - <<'PY'
           from pathlib import Path
           from playwright.sync_api import sync_playwright
           from faster_whisper import WhisperModel
           import requests,json,urllib.parse,hashlib
-          pages={'02':'e8c570dfa4824dd6bc04311f881485e0','03':'8b6b54506d18478fb8c8634ec3d4d7de'}
           with sync_playwright() as pw:
-              b=pw.chromium.launch(headless=True)
-              for num,cid in pages.items():
-                  p=b.new_page();p.goto('https://www.aidocmaker.com/g0/audio?name='+cid,wait_until='domcontentloaded',timeout=90000)
-                  src=[]
-                  for n in range(65):
-                      src=p.locator('audio, audio source').evaluate_all('(xs)=>xs.map(x=>x.currentSrc||x.src).filter(Boolean)')
-                      if src:break
-                      p.wait_for_timeout(1000)
-                  assert src
-                  u=urllib.parse.urlparse(src[0]);assert u.scheme=='https' and u.netloc=='storage.googleapis.com'
-                  print('::add-mask::'+src[0]);r=requests.get(src[0],timeout=60);r.raise_for_status()
-                  Path('refined',num+'.mp3').write_bytes(r.content);p.close()
-              b.close()
+              b=pw.chromium.launch(headless=True);p=b.new_page()
+              p.goto('https://www.aidocmaker.com/g0/audio?name=f617622a75cd4ecf8310a96468931f3a',wait_until='domcontentloaded',timeout=90000)
+              src=[]
+              for n in range(65):
+                  src=p.locator('audio, audio source').evaluate_all('(xs)=>xs.map(x=>x.currentSrc||x.src).filter(Boolean)')
+                  if src:break
+                  p.wait_for_timeout(1000)
+              assert src
+              u=urllib.parse.urlparse(src[0]);assert u.scheme=='https' and u.netloc=='storage.googleapis.com'
+              print('::add-mask::'+src[0]);r=requests.get(src[0],timeout=60);r.raise_for_status()
+              f=Path('final/02.mp3');f.write_bytes(r.content);b.close()
           model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
-          records=[]
-          for f in sorted(Path('refined').glob('*.mp3')):
-              seg,info=model.transcribe(str(f),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
-              d={'file':f.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in seg]}
-              f.with_name(f.stem+'_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2))
-              records.append({'file':f.name,'sha256':hashlib.sha256(f.read_bytes()).hexdigest(),'bytes':f.stat().st_size,'duration':info.duration})
-              print(f.name,[s['text'] for s in d['segments']])
-          Path('refined/retrieval.json').write_text(json.dumps(records,indent=2))
+          seg,info=model.transcribe(str(f),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+          d={'file':f.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in seg]}
+          f.with_name(f.stem+'_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2))
+          Path('final/retrieval.json').write_text(json.dumps({'file':f.name,'sha256':hashlib.sha256(f.read_bytes()).hexdigest(),'bytes':f.stat().st_size,'duration':info.duration},indent=2))
+          print([s['text'] for s in d['segments']])
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: phys013-refined-narration
-          path: refined/
+          name: phys013-final-definition
+          path: final/
           retention-days: 2
