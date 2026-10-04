@@ -1,4 +1,4 @@
-name: PHYS019 flow narration
+name: PHYS019 refined readings
 on:
   push:
     paths: ['.github/workflows/phys019_flow_voice_20261004.yml']
@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Retrieve commissioned Japanese narration
+      - name: Retrieve refined commissioned narration
         run: |
           python -m pip -q install playwright requests av faster-whisper
           python -m playwright install --with-deps chromium >/dev/null 2>&1
@@ -22,7 +22,7 @@ jobs:
           import requests,json,urllib.parse,hashlib,av
           from playwright.sync_api import sync_playwright
           from faster_whisper import WhisperModel
-          pages={'01':'d7417c0be3a7448296979cb30affab4d','02':'84ac914349e94afbb1689387138d09e0','03':'177d707c13ab42648f7ccc6c1eeaa9fd','04':'d72fc3f1768d4925b5e43cdf956dcf5b','05':'5511699ac005434c885c30b83a7b2d8c','06':'0779ab048e10479cb4eae45382cd3334'}
+          pages={'01':'9d319e58bfbe41f1b347e1ffcf681ae0','02':'4d82422358b14fbd8d5c7e8bc441e335','03':'9e7396144c724fff80eb01c618cf4ac3','04':'bb20ef11b3be4a43b8009ee49d51e866','06':'6088f03d1ae540a49fc373216bb2a564'}
           records=[]
           with sync_playwright() as pw:
               browser=pw.chromium.launch(headless=True)
@@ -55,6 +55,6 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: phys019-flow-narration
+          name: phys019-flow-refined
           path: narration/
           retention-days: 7
