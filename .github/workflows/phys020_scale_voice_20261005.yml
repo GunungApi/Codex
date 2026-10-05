@@ -1,4 +1,4 @@
-name: PHYS020 scale narration
+name: PHYS020 refined readings
 on:
   push:
     paths: ['.github/workflows/phys020_scale_voice_20261005.yml']
@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Retrieve commissioned narration and align speech
+      - name: Retrieve replacement narration and word timings
         run: |
           python -m pip -q install playwright requests av faster-whisper
           python -m playwright install --with-deps chromium >/dev/null 2>&1
@@ -22,7 +22,7 @@ jobs:
           from pathlib import Path
           from playwright.sync_api import sync_playwright
           from faster_whisper import WhisperModel
-          pages={'01':'da36fde8601f45a8ba0f237ee149302d','02':'0ebd5196312d4faab0cd011798ee2b7c','03':'e33c5f2642c74dc5b066099535073583','04':'a78b6cf3fd9f45f484a061dd7df8bff7','05':'35f7c307e1b64af0949e1e00c287465a','06':'f54a3e485c8b48bf85b24e60d0302bbf'}
+          pages={'01':'f3207da66a7c4e5fb0ae29fe6dd7fd45','02':'553bc76a42704111ac605977d922be8b','04':'0a6d4f9b27614057a953268643b7e054','06':'dfaa17a93fd044a7ac0ec2ee2b124882'}
           records=[]
           with sync_playwright() as pw:
               b=pw.chromium.launch(headless=True)
@@ -49,6 +49,6 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: phys020-scale-narration
+          name: phys020-scale-refined
           path: narration/
           retention-days: 7
