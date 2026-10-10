@@ -1,4 +1,4 @@
-name: PHYS023 narration recovery
+name: PHYS023 refined readings
 on:
   push:
     paths: ['.github/workflows/phys023_narration_20261011.yml']
@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Recover commissioned audio and align Japanese words
+      - name: Recover commissioned replacements and align Japanese words
         run: |
           python -m pip -q install playwright requests av faster-whisper
           python -m playwright install --with-deps chromium >/dev/null 2>&1
@@ -22,8 +22,7 @@ jobs:
           import requests,json,urllib.parse,hashlib,av,importlib.metadata
           from playwright.sync_api import sync_playwright
           from faster_whisper import WhisperModel
-          # Stable public generation records; temporary media URLs are resolved only at runtime.
-          pages={'01':'1d6fb4e871c64f1ba2ba4a13dd1c4b60','02':'6c3284657de5416fb8a9ea26aa0cb47c','03':'ec3b35d70e8f4071aaff451392f79c37','04':'93c04e8961b644c4899d539e37584a69','05':'a26006898b404c55bc76afaeac132c19','06':'163985752b374245a20868722505c8d3','07':'86aba5d6af104288beb30c6ac0428d8a'}
+          pages={'02':'3f3bc2c2120d4895ac1f9b0809aa64ec','03':'a63fe29672c34a0f8c062e11869cae2a'}
           records=[]
           with sync_playwright() as pw:
               browser=pw.chromium.launch(headless=True)
@@ -57,6 +56,6 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: phys023-narration-and-timing
+          name: phys023-refined-readings
           path: narration/
           retention-days: 7
