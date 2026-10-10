@@ -1,4 +1,4 @@
-name: Four planets 002 commissioned narration
+name: Four planets 002 corrected readings
 on:
   push:
     paths: ['.github/workflows/fourplanets002_narration_20261011.yml']
@@ -7,12 +7,12 @@ permissions:
 jobs:
   narration:
     runs-on: ubuntu-latest
-    timeout-minutes: 14
+    timeout-minutes: 12
     steps:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Retrieve six commissioned narration files
+      - name: Retrieve newly commissioned corrected speech
         run: |
           python -m pip -q install playwright requests av faster-whisper
           python -m playwright install --with-deps chromium >/dev/null 2>&1
@@ -21,7 +21,7 @@ jobs:
           from pathlib import Path
           import requests,json,urllib.parse,hashlib,av
           from playwright.sync_api import sync_playwright
-          pages={'01':'c61698406dee40aa994f545756134200','02':'c2ba39f4348845a99c40eacf17ef0839','03':'8ca9245d80ad44078cee6f47b51297a2','04':'20d9e4b4243c4244824f9a0d89c75555','05':'b3788603ffb7445a98240c391fe6e48b','06':'0a8e036404394302ad96e6130ab331a5'}
+          pages={'03':'92cf04eb04914789a06b26fea00db816','05':'a275cffdd12c4a1497a6aad12e695c40'}
           records=[]
           with sync_playwright() as pw:
               browser=pw.chromium.launch(headless=True)
@@ -58,6 +58,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fourplanets002-narration
+          name: fourplanets002-corrected-narration
           path: narration/
           retention-days: 1
