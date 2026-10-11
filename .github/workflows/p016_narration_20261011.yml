@@ -1,0 +1,71 @@
+name: P016 narration recovery
+on:
+  push:
+    paths: ['.github/workflows/p016_narration_20261011.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: p016-transfer-key
+          run-id: 38131242693
+          github-token: ${{ github.token }}
+          path: private
+      - name: Recover generated voice without exposing source links
+        env:
+          CIPHER: G8LtQi7KMAFp9LZsuxTvqHRj2yZ5nKtKUuFKlgxAffcyn+4K6neY9oJBORsMo0kc7KUokvfyJGJnsP0f/ufqZC8EKrlMgDbPXzsOAwVURuoui8mdYDgI+1gKKDjY2XTCl/q1LLYhIpU9s21k9ahEgkApFjqJ9Sw9MINlWre90B791HOTnP0mWXNVD9uLODJMKJtCn3BQltqCNrsV3TGluixo1Pu8rZ8z9G+A0LfAbFsaui2tS++Z/q+wetpDsdl/GDgiiBMXH6Pz9TefViyA9QRiHDkeQMjpNdWwAcbWaoLBoiTqIU/RHGkPt0LzZProo1TsyyIt/ut4WFhGnseznKjn6MQedKpKjZJe+5LRL8NcoqIQMXh9Ky7RN5wMNsIBC1IkzTmIAID1mJJX0PXxtIH/zruX+IrjIluWlRP827PBLKgP/of+/2SM4gzvtP+XGO/N0LJcjLvIeVKTBRPWcOVFXbV/EKEA9ji0x5pZ9QMRgvaSK+f1DZBGWGlRO7/7WH1zk2IxbmtY2XjqKROLCWQ5Z8X5XCl2DXN9JXk9fgv9LSNoOmLHmvn65gvXAXzJtLTo8S7uGLevhOMrJ4/Yxjpmi/pv2spsEI/akE9JRA83of3aZvBLnHGa+RGuVBSXxlqQ2ciYcGfSeAsiFbNl8RU6N601gA8y/4pPicC7jWs=
+        run: |
+          python -m pip -q install cryptography requests av faster-whisper
+          mkdir -p narration
+          python - <<'PY'
+          import os,json,base64,hashlib,requests,av
+          from pathlib import Path
+          from cryptography.hazmat.primitives import serialization,hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          key=serialization.load_pem_private_key(Path('private/key.pem').read_bytes(),password=None)
+          ids=json.loads(key.decrypt(base64.b64decode(os.environ['CIPHER']),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None)))
+          assert len(ids)==6
+          records=[]
+          for i,uid in enumerate(ids,1):
+              url='https://storage.googleapis.com/adm--audio-playback--7d--public/mcp-preview/'+uid+'.mp3'
+              print('::add-mask::'+url); print('::add-mask::'+uid)
+              r=requests.get(url,timeout=80); assert r.status_code==200,'Audio recovery failed'
+              p=Path('narration',f'{i:02d}.mp3');p.write_bytes(r.content)
+              a=av.open(str(p));duration=a.duration/av.time_base;frames=sum(1 for _ in a.decode(audio=0))
+              assert 2<duration<28 and frames>10
+              records.append({'file':p.name,'duration':duration,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'decoded_frames':frames})
+          Path('narration/retrieval.json').write_text(json.dumps(records,indent=2))
+          print(json.dumps(records))
+          Path('private/key.pem').unlink()
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p016-original-voice
+          path: narration/
+          retention-days: 3
+      - name: Measure Japanese word timings
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('narration').glob('*.mp3')):
+              segments,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              data={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segments]}
+              p.with_name(p.stem+'_words.json').write_text(json.dumps(data,ensure_ascii=False,indent=2))
+              print(p.name,[s['text'] for s in data['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p016-timed-voice
+          path: narration/
+          retention-days: 3
