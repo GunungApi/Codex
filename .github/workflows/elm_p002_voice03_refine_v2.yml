@@ -1,0 +1,55 @@
+name: ELM P002 narration 03 pronunciation refinement
+on:
+  push:
+    paths: ['.github/workflows/elm_p002_voice03_refine_v2.yml']
+permissions:
+  contents: read
+jobs:
+  refine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install neural speech and alignment tools
+        run: |
+          python -m pip -q install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          python -m pip -q install qwen-tts soundfile faster-whisper scipy
+          sudo apt-get update -qq && sudo apt-get install -y -qq sox libsox-fmt-all
+      - name: Generate and inspect third passage
+        run: |
+          mkdir -p refined
+          python -u - <<'PY'
+          from pathlib import Path
+          import json,time,hashlib,math
+          import numpy as np,soundfile as sf,torch
+          from scipy.signal import resample_poly
+          from qwen_tts import Qwen3TTSModel
+          from faster_whisper import WhisperModel
+          torch.set_num_threads(4);torch.manual_seed(261011203)
+          text='中をのぞくと、立体に連なる結晶、薄いシート、細いくだ。形の違う炭素を、組み合わせて使う。'
+          style='自然な日本語の科学ドキュメンタリー。知的で親しみやすく、少し驚きを感じる、落ち着いた明瞭な語り。会話に近い自然な速さ。炭素は「たんそ」と短く正確に読む。'
+          mid='Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice'
+          model=Qwen3TTSModel.from_pretrained(mid,device_map='cpu',dtype=torch.float32,attn_implementation='sdpa')
+          t=time.time();wavs,sr=model.generate_custom_voice(text=text,language='Japanese',speaker='Ono_Anna',instruct=style,max_new_tokens=400,do_sample=True,temperature=.7,top_p=.95,repetition_penalty=1.05)
+          a=np.asarray(wavs[0],dtype=np.float32);assert np.isfinite(a).all() and 5<len(a)/sr<18
+          p=Path('refined/03.wav');sf.write(p,a,sr,subtype='PCM_16')
+          rec={'index':3,'file':p.name,'text':text,'model':mid,'voice':'Ono_Anna','instruction':style,'sample_rate':sr,'duration':len(a)/sr,'peak':float(np.max(np.abs(a))),'generation_seconds':time.time()-t,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'revision':'炭素の発音を明確化'}
+          Path('refined/03_generation.json').write_text(json.dumps(rec,ensure_ascii=False,indent=2))
+          del model
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          a,sr=sf.read(p,dtype='float32');g=math.gcd(sr,16000);a=resample_poly(a,16000//g,sr//g).astype(np.float32)
+          segs,info=model.transcribe(a,language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+          d={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segs]}
+          Path('refined/03_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2));print(rec,flush=True);print([s['text'] for s in d['segments']],flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: elm-p002-v2-voice03-refined
+          path: refined/
+          retention-days: 7
