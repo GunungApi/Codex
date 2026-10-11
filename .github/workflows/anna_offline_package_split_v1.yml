@@ -1,0 +1,86 @@
+name: Split offline narration software package
+on:
+  push:
+    paths: ['.github/workflows/anna_offline_package_split_v1.yml']
+permissions:
+  contents: read
+  actions: write
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: anna-offline-runtime-v1
+          path: runtime
+          run-id: 38129843399
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: anna-offline-model-v1
+          path: parts
+          run-id: 38129843399
+          github-token: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-runtime-small
+          path: |
+            runtime/
+            !runtime/whisper-small/**
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-asr-small
+          path: runtime/whisper-small/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-talker-01
+          path: parts/talker-01/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-talker-02
+          path: parts/talker-02/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-talker-03
+          path: parts/talker-03/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-talker-04
+          path: parts/talker-04/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-talker-05
+          path: parts/talker-05/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-talker-06
+          path: parts/talker-06/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-codec-01
+          path: parts/codec-01/
+          retention-days: 1
+          compression-level: 0
+      - name: Delete superseded oversized software archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method DELETE repos/GunungApi/Codex/actions/artifacts/11699107268
+          gh api --method DELETE repos/GunungApi/Codex/actions/artifacts/11698822810
