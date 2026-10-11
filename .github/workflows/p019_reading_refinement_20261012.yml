@@ -35,13 +35,14 @@ jobs:
           display='星や銀河のまわりで、電離した領域が広がり、つながっていく。中性だった水素が、再び電離する。宇宙の再電離だ。'
           spoken='ほしや、銀河のまわりで、電離した領域が広がり、つながっていく。中性だった水素が、再び電離する。宇宙の再電離だ。'
           r=requests.post(b+'/audio_query',params={'text':spoken,'speaker':2},timeout=60);r.raise_for_status();q=r.json()
-          assert 'ホシ' in q['kana']
+          print(q['kana'],flush=True)
+          kana=q['kana'].replace("'",'').replace('_','').replace('/','')
+          assert kana.startswith('ホシヤ'),kana
           q.update(speedScale=1.0,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.0,prePhonemeLength=0.15,postPhonemeLength=0.25,outputSamplingRate=48000,outputStereo=False)
           r=requests.post(b+'/synthesis',params={'speaker':2},json=q,timeout=120);r.raise_for_status();p=Path('narration/04.wav');p.write_bytes(r.content)
           a=av.open(str(p));duration=a.duration/av.time_base;frames=sum(1 for _ in a.decode(audio=0))
           Path('narration/04_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
           Path('narration/04_retrieval.json').write_text(json.dumps({'file':p.name,'text':display,'spoken_text':spoken,'duration':duration,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'kana':q['kana'],'decoded_frames':frames},ensure_ascii=False,indent=2))
-          print(q['kana'])
           from faster_whisper import WhisperModel
           m=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
           segs,info=m.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
