@@ -1,0 +1,21 @@
+name: Clean downloaded offline narration packages
+on:
+  push:
+    paths: ['.github/workflows/anna_package_cleanup_20261011.yml']
+permissions:
+  contents: read
+  actions: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Delete only the nine temporary software packages downloaded for this session
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          for id in 11698322696 11698257775 11697948701 11698582556 11698317603 11698332558 11698107862 11698717344 11698077963; do
+            gh api --method DELETE "repos/GunungApi/Codex/actions/artifacts/$id"
+            echo "Removed temporary package $id"
+          done
