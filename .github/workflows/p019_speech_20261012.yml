@@ -1,0 +1,73 @@
+name: P019 authored narration
+on:
+  push:
+    paths: ['.github/workflows/p019_speech_20261012.yml']
+permissions:
+  contents: read
+jobs:
+  synthesize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start Japanese speech engine
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+          python -m pip -q install requests av faster-whisper
+      - name: Synthesize original script and save readings
+        run: |
+          mkdir -p narration
+          python - <<'PY'
+          import json,time,hashlib,requests,av
+          from pathlib import Path
+          base='http://127.0.0.1:50021'
+          for attempt in range(90):
+              try:
+                  r=requests.get(base+'/speakers',timeout=5)
+                  if r.ok: break
+              except requests.RequestException: pass
+              time.sleep(2)
+          r.raise_for_status()
+          person=next(s for s in r.json() if s['name']=='四国めたん')
+          sid=next(s['id'] for s in person['styles'] if s['name']=='ノーマル')
+          texts=['星が灯ると、宇宙のガスまで変わっていく。銀河のまわりに広がる、この領域を見てみよう。','鍵は、エネルギーの高い紫外線。水素原子がその光を吸収すると、電子が離れ、自由に動けるようになる。','この変化が、電離。原子核も、離れた電子も、ガスとして宇宙に残っている。','星や銀河のまわりで、電離した領域が広がり、つながっていく。中性だった水素が、再び電離する。宇宙の再電離だ。','変化の進み方は、場所ごとに違う。まだ中性のガスが残る場所と、すでに電離した場所が、入り交じる。','星の光は、周りの世界まで作り変える。小さな灯りが重なって、宇宙の新しい時代が始まる。']
+          readings=[('銀河','ギンガ',1),('電離','デンリ',1),('再電離','サイデンリ',3),('紫外線','シガイセン',0),('水素原子','スイソゲンシ',4),('原子核','ゲンシカク',3),('領域','リョウイキ',0),('中性','チュウセイ',0),('灯り','アカリ',0)]
+          for word,kana,accent in readings:
+              r=requests.post(base+'/user_dict_word',params={'surface':word,'pronunciation':kana,'accent_type':accent,'priority':8},timeout=20);r.raise_for_status()
+          records=[]
+          for i,text in enumerate(texts,1):
+              r=requests.post(base+'/audio_query',params={'text':text,'speaker':sid},timeout=60);r.raise_for_status();q=r.json()
+              q.update(speedScale=1.0,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.0,prePhonemeLength=0.15,postPhonemeLength=0.25,outputSamplingRate=48000,outputStereo=False)
+              p=Path('narration',f'{i:02d}.wav')
+              r=requests.post(base+'/synthesis',params={'speaker':sid},json=q,timeout=120);r.raise_for_status();p.write_bytes(r.content)
+              a=av.open(str(p));duration=a.duration/av.time_base;frames=sum(1 for _ in a.decode(audio=0));assert 2<duration<25 and frames>1
+              p.with_name(p.stem+'_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              records.append({'file':p.name,'text':text,'duration':duration,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'kana':q.get('kana'),'decoded_frames':frames})
+              print(p.name,duration,q.get('kana'))
+          Path('narration/retrieval.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          Path('narration/voice.json').write_text(json.dumps({'engine':'VOICEVOX','engine_version':requests.get(base+'/version').json(),'speaker':person,'selected_style_id':sid,'credit':'VOICEVOX:四国めたん','readings':readings},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p019-original-voice
+          path: narration/
+          retention-days: 3
+      - name: Measure word timings and compare transcript
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('narration').glob('*.wav')):
+              segs,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              data={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segs]}
+              p.with_name(p.stem+'_words.json').write_text(json.dumps(data,ensure_ascii=False,indent=2));print(p.name,[s['text'] for s in data['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p019-voice-with-timings
+          path: narration/
+          retention-days: 3
