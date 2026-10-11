@@ -1,0 +1,68 @@
+name: Build offline Anna narration runtime
+on:
+  push:
+    paths: ['.github/workflows/anna_offline_build_v1.yml']
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build CPU speech software
+        run: |
+          git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/ServeurpersoCom/qwentts.cpp.git engine
+          cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_BLAS=OFF -DGGML_AVX512=OFF -DBUILD_SHARED_LIBS=OFF
+          cmake --build engine/build --config Release -j 4
+          mkdir -p runtime/bin runtime/licenses runtime/wheels
+          cp engine/build/qwen-tts runtime/bin/
+          find engine/build -name '*.so*' -type f -exec cp {} runtime/bin/ \;
+          cp engine/LICENSE runtime/licenses/qwentts-MIT.txt
+          cp engine/README.md runtime/licenses/qwentts-README.md
+          git -C engine rev-parse HEAD > runtime/engine_revision.txt
+          LD_LIBRARY_PATH=runtime/bin runtime/bin/qwen-tts --help > runtime/cli_help.txt 2>&1 || test "$?" -eq 1
+          python -m pip download --only-binary=:all: faster-whisper moderngl glcontext -d runtime/wheels
+          python -m pip -q install huggingface_hub
+      - name: Package public model dependencies for offline software installation
+        run: |
+          python -u - <<'PY'
+          from pathlib import Path
+          from huggingface_hub import hf_hub_download,snapshot_download,HfApi
+          import json,hashlib,shutil
+          api=HfApi();records=[]
+          repo='Serveurperso/Qwen3-TTS-GGUF'
+          rev=api.model_info(repo).sha
+          for name in ['qwen-talker-1.7b-customvoice-Q8_0.gguf','qwen-tokenizer-12hz-BF16.gguf']:
+              p=Path(hf_hub_download(repo,name,revision=rev))
+              digest=hashlib.sha256()
+              idx=0
+              with p.open('rb') as f:
+                  while data:=f.read(350*1024*1024):
+                      digest.update(data);idx+=1
+                      label=('talker' if 'talker' in name else 'codec')+f'-{idx:02}'
+                      out=Path('parts',label);out.mkdir(parents=True)
+                      (out/(name+f'.part{idx:02}')).write_bytes(data)
+              records.append({'file':name,'repo':repo,'revision':rev,'size':p.stat().st_size,'sha256':digest.hexdigest(),'parts':idx})
+          card=hf_hub_download(repo,'README.md',revision=rev)
+          shutil.copy(card,'runtime/licenses/model-README.md')
+          wr='Systran/faster-whisper-small'; wrev=api.model_info(wr).sha
+          snapshot_download(wr,revision=wrev,local_dir='runtime/whisper-small',allow_patterns=['*.json','*.txt','model.bin'])
+          shutil.rmtree('runtime/whisper-small/.cache',ignore_errors=True)
+          Path('runtime/model_manifest.json').write_text(json.dumps(records,indent=2))
+          print(json.dumps(records,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-offline-runtime-v1
+          path: runtime/
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anna-offline-model-v1
+          path: parts/
+          retention-days: 1
+          compression-level: 0
