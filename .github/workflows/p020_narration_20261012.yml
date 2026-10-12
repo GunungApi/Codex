@@ -1,0 +1,74 @@
+name: P020 original narration
+on:
+  push:
+    paths: ['.github/workflows/p020_narration_20261012.yml']
+permissions:
+  contents: read
+jobs:
+  synthesize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start Japanese speech engine
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+          python -m pip -q install requests av faster-whisper
+      - name: Synthesize original narration
+        run: |
+          mkdir -p narration
+          python - <<'PY'
+          import json,time,hashlib,requests,av
+          from pathlib import Path
+          base='http://127.0.0.1:50021'
+          for attempt in range(90):
+              try:
+                  r=requests.get(base+'/speakers',timeout=5)
+                  if r.ok:break
+              except requests.RequestException:pass
+              time.sleep(2)
+          r.raise_for_status()
+          person=next(s for s in r.json() if s['name']=='四国めたん')
+          sid=next(s['id'] for s in person['styles'] if s['name']=='ノーマル')
+          texts=['星も、銀河もある。それなのに、地球はまだない。宇宙が生まれて、およそ十億年の景色だ。','太陽系が生まれるのは、ここから、さらに八十億年以上先。今は、その材料が育っている時代だ。','星の中で増えた、炭素や酸素。それを含むガスが外へ広がり、次の星の材料へ、受け渡されていく。','材料が、どこに集まるのか。どれだけ冷え、どんな速さで回るのか。その違いが、育つ世界を変えていく。','星のまわりの円盤では、小さな粒が集まっていく。材料から惑星へ。そのあいだにも、長い物語がある。','まだ、私たちの地球はない。でも、世界をつくる材料は、もう旅を始めている。次は、その先の宇宙へ。']
+          spoken=[t.replace('星も','ほしも').replace('星の','ほしの') for t in texts]
+          readings=[('銀河','ギンガ',1),('地球','チキュウ',0),('太陽系','タイヨウケイ',0),('炭素','タンソ',1),('酸素','サンソ',1),('円盤','エンバン',0),('惑星','ワクセイ',0)]
+          for word,kana,accent in readings:
+              r=requests.post(base+'/user_dict_word',params={'surface':word,'pronunciation':kana,'accent_type':accent,'priority':8},timeout=20);r.raise_for_status()
+          records=[]
+          for i,(text,spoken_text) in enumerate(zip(texts,spoken),1):
+              r=requests.post(base+'/audio_query',params={'text':spoken_text,'speaker':sid},timeout=60);r.raise_for_status();q=r.json()
+              q.update(speedScale=1.0,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.0,prePhonemeLength=0.15,postPhonemeLength=0.25,outputSamplingRate=48000,outputStereo=False)
+              p=Path('narration',f'{i:02d}.wav')
+              r=requests.post(base+'/synthesis',params={'speaker':sid},json=q,timeout=120);r.raise_for_status();p.write_bytes(r.content)
+              a=av.open(str(p));duration=a.duration/av.time_base;frames=sum(1 for _ in a.decode(audio=0));assert 2<duration<25 and frames>1
+              p.with_name(p.stem+'_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              records.append({'file':p.name,'text':text,'spoken_text':spoken_text,'duration':duration,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'kana':q.get('kana'),'decoded_frames':frames})
+              print(p.name,duration,q.get('kana'))
+          Path('narration/retrieval.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          Path('narration/voice.json').write_text(json.dumps({'engine':'VOICEVOX','engine_version':requests.get(base+'/version').json(),'speaker':person,'selected_style_id':sid,'credit':'VOICEVOX:四国めたん','readings':readings},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p020-original-voice
+          path: narration/
+          retention-days: 3
+      - name: Measure Japanese word timings
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('narration').glob('*.wav')):
+              segs,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              data={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segs]}
+              p.with_name(p.stem+'_words.json').write_text(json.dumps(data,ensure_ascii=False,indent=2));print(p.name,[s['text'] for s in data['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p020-voice-with-timings
+          path: narration/
+          retention-days: 3
