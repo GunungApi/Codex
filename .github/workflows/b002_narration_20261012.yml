@@ -1,0 +1,74 @@
+name: B002 original narration
+on:
+  push:
+    paths: ['.github/workflows/b002_narration_20261012.yml']
+permissions:
+  contents: read
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start official Japanese speech engine
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+          python -m pip -q install requests av faster-whisper
+      - name: Synthesize authored text and preserve phonemes
+        run: |
+          mkdir -p narration
+          python - <<'PY'
+          import json,time,hashlib,requests,av
+          from pathlib import Path
+          b='http://127.0.0.1:50021'
+          for attempt in range(90):
+              try:
+                  r=requests.get(b+'/speakers',timeout=5)
+                  if r.ok:break
+              except requests.RequestException:pass
+              time.sleep(2)
+          r.raise_for_status()
+          person=next(s for s in r.json() if s['name']=='四国めたん')
+          sid=next(s['id'] for s in person['styles'] if s['name']=='ノーマル')
+          texts=['この銀河、いまはもう、違う姿かもしれない。望遠鏡に届いたのは、遠い昔に出発した光だ。','光が宇宙を渡るには、時間がかかる。遠くを見るほど、光が出たころの、古い姿を見ている。','一方、近くにも、とても古い星はある。たとえば、ケプラー四四四。星の年齢は、およそ百十二億年と推定された。','この数字は、光が旅した時間とは別だ。星の小さな揺れなどを測り、内部と進化の模型から、年齢を調べる。','星が生まれたとき。光が出たとき。そして、いま届いたとき。三つの時刻を分けると、宇宙の歴史が読めてくる。','遠い光から、昔の景色へ。近くの星から、長い生涯へ。空には、過去を知る、違う入り口がある。']
+          readings=[('銀河','ギンガ',1),('望遠鏡','ボウエンキョウ',0),('年齢','ネンレイ',0),('生涯','ショウガイ',1),('模型','モケイ',0),('時刻','ジコク',1),('百十二億年','ヒャクジュウニオクネン',5)]
+          for word,kana,accent in readings:
+              r=requests.post(b+'/user_dict_word',params={'surface':word,'pronunciation':kana,'accent_type':accent,'priority':8},timeout=20);r.raise_for_status()
+          records=[]
+          for i,text in enumerate(texts,1):
+              spoken=text.replace('星','ほし').replace('四四四','よんよんよん').replace('百十二億年','ひゃくじゅうにおくねん').replace('空には','そらには')
+              r=requests.post(b+'/audio_query',params={'text':spoken,'speaker':sid},timeout=60);r.raise_for_status();q=r.json()
+              q.update(speedScale=1.03,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.0,prePhonemeLength=0.15,postPhonemeLength=0.25,outputSamplingRate=48000,outputStereo=False)
+              p=Path('narration',f'{i:02d}.wav')
+              r=requests.post(b+'/synthesis',params={'speaker':sid},json=q,timeout=120);r.raise_for_status();p.write_bytes(r.content)
+              a=av.open(str(p));duration=a.duration/av.time_base;frames=sum(1 for _ in a.decode(audio=0));assert 2<duration<25 and frames>1
+              p.with_name(p.stem+'_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              records.append({'file':p.name,'text':text,'spoken_text':spoken,'duration':duration,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'kana':q.get('kana'),'decoded_frames':frames})
+              print(p.name,duration,q.get('kana'))
+          Path('narration/retrieval.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          Path('narration/voice.json').write_text(json.dumps({'engine':'VOICEVOX','engine_version':requests.get(b+'/version').json(),'speaker':person,'selected_style_id':sid,'credit':'VOICEVOX:四国めたん','readings':readings},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b002-original-narration
+          path: narration/
+          retention-days: 3
+      - name: Measure original waveform word times
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          m=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('narration').glob('*.wav')):
+              segs,info=m.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              d={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segs]}
+              p.with_name(p.stem+'_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2));print(p.name,[s['text'] for s in d['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b002-narration-with-timings
+          path: narration/
+          retention-days: 3
