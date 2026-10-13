@@ -1,0 +1,72 @@
+name: B003 original narration
+on:
+  push:
+    paths: ['.github/workflows/b003_narration_20261013.yml']
+permissions:
+  contents: read
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start official speech engine
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+          python -m pip -q install requests av faster-whisper
+      - name: Generate authored narration
+        run: |
+          mkdir -p narration
+          python - <<'PY'
+          import json,time,hashlib,requests,av
+          from pathlib import Path
+          b='http://127.0.0.1:50021'
+          for attempt in range(90):
+              try:
+                  r=requests.get(b+'/speakers',timeout=5)
+                  if r.ok:break
+              except requests.RequestException:pass
+              time.sleep(2)
+          r.raise_for_status()
+          person=next(s for s in r.json() if s['name']=='四国めたん')
+          sid=next(s['id'] for s in person['styles'] if s['name']=='ノーマル')
+          texts=['この暗いすき間に、惑星がいるんだろうか。これは、アルマ望遠鏡が捉えた、若い星の円盤だ。','惑星の重力は、周りのガスを揺さぶる。材料の分布が変わって、すき間ができる場合がある。','一つの惑星が、複数のすき間を作る計算もある。ちりの性質など、別の仕組みで模様ができる場合もある。','そこで、別の手掛かりを重ねる。違う波長で見たり、ガスの動きを測ったり、惑星自身の光を探したりする。','二千二十五年には、すき間の中で育つ惑星の光も捉えられた。模様と天体を、別々の証拠でつなぐんだ。','模様は、次に調べる場所を教えてくれる。一本の暗いすき間が、次の発見への入り口になる。']
+          readings=[('惑星','ワクセイ',0),('望遠鏡','ボウエンキョウ',0),('円盤','エンバン',0),('重力','ジュウリョク',1),('分布','ブンプ',0),('複数','フクスウ',3),('波長','ハチョウ',0),('天体','テンタイ',0),('証拠','ショウコ',0),('模様','モヨウ',0)]
+          for word,kana,accent in readings:
+              requests.post(b+'/user_dict_word',params={'surface':word,'pronunciation':kana,'accent_type':accent,'priority':8},timeout=20).raise_for_status()
+          records=[]
+          for i,text in enumerate(texts,1):
+              spoken=text.replace('若い星','わかいほし').replace('二千二十五年','にせんにじゅうごねん').replace('すき間','すきま').replace('一本','いっぽん')
+              r=requests.post(b+'/audio_query',params={'text':spoken,'speaker':sid},timeout=60);r.raise_for_status();q=r.json()
+              q.update(speedScale=1.02,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.,prePhonemeLength=.15,postPhonemeLength=.25,outputSamplingRate=48000,outputStereo=False)
+              r=requests.post(b+'/synthesis',params={'speaker':sid},json=q,timeout=120);r.raise_for_status();p=Path('narration',f'{i:02d}.wav');p.write_bytes(r.content)
+              a=av.open(str(p));duration=a.duration/av.time_base;frames=sum(1 for _ in a.decode(audio=0));assert 2<duration<25 and frames>1
+              p.with_name(p.stem+'_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              records.append({'file':p.name,'text':text,'spoken_text':spoken,'duration':duration,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'kana':q['kana'],'decoded_frames':frames});print(p.name,duration,q['kana'])
+          Path('narration/retrieval.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          Path('narration/voice.json').write_text(json.dumps({'engine':'VOICEVOX','engine_version':requests.get(b+'/version').json(),'speaker':person,'selected_style_id':sid,'credit':'VOICEVOX:四国めたん','readings':readings},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b003-original-narration
+          path: narration/
+          retention-days: 3
+      - name: Measure speech word timings
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('narration').glob('*.wav')):
+              segs,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              d={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segs]}
+              p.with_name(p.stem+'_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2));print(p.name,[s['text'] for s in d['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: b003-narration-with-timings
+          path: narration/
+          retention-days: 3
