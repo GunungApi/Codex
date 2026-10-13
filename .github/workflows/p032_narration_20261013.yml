@@ -20,7 +20,7 @@ jobs:
         run: |
           mkdir -p narration
           python - <<'PY'
-          import json,time,hashlib,requests,av
+          import json,time,hashlib,requests,av,re
           from pathlib import Path
           b='http://127.0.0.1:50021'
           for attempt in range(90):
@@ -33,12 +33,12 @@ jobs:
           person=next(s for s in r.json() if s['name']=='四国めたん')
           sid=next(s['id'] for s in person['styles'] if s['name']=='ノーマル')
           texts=['せっかく育った粒が、星へ近づいていく。大きく育つだけでは、惑星への道は終わらない。','同じ星から、同じ距離で比べよう。ふつう、ガスは圧力にも支えられ、固体だけで回るときより、少し遅い。','そのガスの中を進む粒は、向かい風のような抵抗を受ける。回転の勢いがガスへ渡り、軌道は内側へ移っていく。','ここで、ガスの抵抗を外してみる。同じ場所、同じ速さで出発しても、今度は、星の周りを回り続ける。','小さな粒は、ガスに乗りやすく、大きな天体は、影響を受けにくい。途中には、速く流れ去る粒がある。ガスの濃さでも変わる。','育つことと、その場所に残ること。惑星の材料には、どちらも大切だ。では、粒を集めておける場所はあるんだろう。']
-          readings=[('圧力','アツリョク',2),('固体','コタイ',0),('抵抗','テイコウ',0),('軌道','キドウ',0),('内側','ウチガワ',0),('向かい風','ムカイカゼ',3),('天体','テンタイ',0),('影響','エイキョウ',0)]
+          readings=[('圧力','アツリョク',2),('固体','コタイ',0),('抵抗','テイコウ',0),('軌道','キドウ',0),('内側','ウチガワ',0),('向かい風','ムカイカゼ',3),('天体','テンタイ',0),('影響','エイキョウ',0),('惑星','ワクセイ',0)]
           for word,kana,accent in readings:
               requests.post(b+'/user_dict_word',params={'surface':word,'pronunciation':kana,'accent_type':accent,'priority':8},timeout=20).raise_for_status()
           records=[]
           for i,text in enumerate(texts,1):
-              spoken=text.replace('星へ','ほしへ').replace('星から','ほしから').replace('星の','ほしの').replace('濃さ','こさ')
+              spoken=re.sub(r'(?<![惑恒原])星','ほし',text).replace('濃さ','こさ')
               r=requests.post(b+'/audio_query',params={'text':spoken,'speaker':sid},timeout=60);r.raise_for_status();q=r.json()
               q.update(speedScale=1.02,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.0,prePhonemeLength=0.15,postPhonemeLength=0.25,outputSamplingRate=48000,outputStereo=False)
               r=requests.post(b+'/synthesis',params={'speaker':sid},json=q,timeout=120);r.raise_for_status();p=Path('narration',f'{i:02d}.wav');p.write_bytes(r.content)
@@ -75,7 +75,8 @@ jobs:
         with:
           python-version: '3.13'
       - name: Prepare renderer installation files
-        run: python -m pip download --only-binary=:all: -d wheels moderngl glcontext
+        run: |
+          python -m pip download --only-binary=:all: -d wheels moderngl glcontext
       - uses: actions/upload-artifact@v4
         with:
           name: p032-renderer-wheels
