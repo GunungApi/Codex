@@ -1,0 +1,73 @@
+name: P027 original narration
+on:
+  push:
+    paths: ['.github/workflows/p027_narration_20261013.yml']
+permissions:
+  contents: read
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start official Japanese speech engine
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+          python -m pip -q install requests av faster-whisper
+      - name: Generate authored narration and preserve pronunciation
+        run: |
+          mkdir -p narration
+          python - <<'PY'
+          import json,time,hashlib,requests,av
+          from pathlib import Path
+          b='http://127.0.0.1:50021'
+          for attempt in range(90):
+              try:
+                  r=requests.get(b+'/speakers',timeout=5)
+                  if r.ok:break
+              except requests.RequestException:pass
+              time.sleep(2)
+          r.raise_for_status()
+          person=next(s for s in r.json() if s['name']=='四国めたん')
+          sid=next(s['id'] for s in person['styles'] if s['name']=='ノーマル')
+          texts=['この小さな粒の表面で、宇宙の化学が進む。惑星になる前から、粒は働いている。','冷たい雲では、原子や分子が、粒の表面にとどまる。ここが、材料どうしの出会う場所になる。','たとえば、水素の原子が二つ。表面を移動して出会うと、水素分子ができる。できた分子は、宇宙へ戻ることもある。','粒の上には、氷の層も育つ。近くの、星がまだない雲では、水や二酸化炭素、メタノールの氷が見つかっている。','何が残るかは、温度や光で変わる。温まったり、光を受けたりすると、離れていく分子もある。','岩の芯と、氷に重なる化学の履歴。次の世界へ渡される材料は、星が生まれる前から、少しずつ変わっている。']
+          readings=[('表面','ヒョウメン',3),('原子','ゲンシ',1),('分子','ブンシ',1),('水素分子','スイソブンシ',4),('二酸化炭素','ニサンカタンソ',4),('化学','カガク',1),('履歴','リレキ',0),('氷','コオリ',0),('芯','シン',1),('惑星','ワクセイ',0)]
+          for word,kana,accent in readings:
+              requests.post(b+'/user_dict_word',params={'surface':word,'pronunciation':kana,'accent_type':accent,'priority':8},timeout=20).raise_for_status()
+          records=[]
+          for i,text in enumerate(texts,1):
+              spoken=text.replace('星が','ほしが').replace('氷','こおり').replace('温まったり','あたたまったり').replace('岩の芯','いわのしん')
+              r=requests.post(b+'/audio_query',params={'text':spoken,'speaker':sid},timeout=60);r.raise_for_status();q=r.json()
+              q.update(speedScale=1.02,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.0,prePhonemeLength=0.15,postPhonemeLength=0.25,outputSamplingRate=48000,outputStereo=False)
+              r=requests.post(b+'/synthesis',params={'speaker':sid},json=q,timeout=120);r.raise_for_status();p=Path('narration',f'{i:02d}.wav');p.write_bytes(r.content)
+              a=av.open(str(p));duration=a.duration/av.time_base;frames=sum(1 for _ in a.decode(audio=0));assert 2<duration<25 and frames>1
+              p.with_name(p.stem+'_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              records.append({'file':p.name,'text':text,'spoken_text':spoken,'duration':duration,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'kana':q.get('kana'),'decoded_frames':frames})
+              print(p.name,duration,q.get('kana'))
+          Path('narration/retrieval.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          Path('narration/voice.json').write_text(json.dumps({'engine':'VOICEVOX','engine_version':requests.get(b+'/version').json(),'speaker':person,'selected_style_id':sid,'credit':'VOICEVOX:四国めたん','readings':readings},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p027-original-narration
+          path: narration/
+          retention-days: 3
+      - name: Measure speech word times
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          m=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('narration').glob('*.wav')):
+              segs,info=m.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              d={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segs]}
+              p.with_name(p.stem+'_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2));print(p.name,[s['text'] for s in d['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p027-narration-with-timings
+          path: narration/
+          retention-days: 3
