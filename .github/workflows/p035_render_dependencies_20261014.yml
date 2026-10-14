@@ -1,0 +1,25 @@
+name: P035 render dependencies
+on:
+  push:
+    paths:
+      - '.github/workflows/p035_render_dependencies_20261014.yml'
+permissions:
+  contents: read
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download rendering wheels only
+        run: |
+          mkdir wheels
+          python -m pip download --only-binary=:all: --no-deps -d wheels moderngl==5.12.0 glcontext==3.0.0
+          sha256sum wheels/* > wheels/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p035-render-python313-wheels
+          path: wheels/
+          retention-days: 1
