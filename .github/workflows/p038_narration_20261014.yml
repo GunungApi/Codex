@@ -1,0 +1,74 @@
+name: P038 original narration
+on:
+  push:
+    paths: ['.github/workflows/p038_narration_20261014.yml']
+permissions:
+  contents: read
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start inherited Japanese voice
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+          python -m pip -q install requests av faster-whisper
+      - name: Generate and decode original narration
+        run: |
+          mkdir -p narration
+          python - <<'PY'
+          import json,time,hashlib,requests,av
+          from pathlib import Path
+          b='http://127.0.0.1:50021'
+          for attempt in range(90):
+              try:
+                  r=requests.get(b+'/speakers',timeout=5)
+                  if r.ok:break
+              except requests.RequestException:pass
+              time.sleep(2)
+          r.raise_for_status()
+          person=next(s for s in r.json() if s['name']=='四国めたん')
+          sid=next(s['id'] for s in person['styles'] if s['name']=='ノーマル')
+          texts=['惑星どうしが、ぶつかる。これで、必ず一つの大きな世界になるんだろうか。','まずは、深くぶつかる例。二つの天体が変形し、材料の多くが、一つの塊へまとまっていく。','でも、全部は残らない。表面の一部は、破片になって外へ飛び出す。','今度は、速さと大きさをそろえ、ぶつかる角度を変える。浅くかすめると、二つの本体が離れていく場合もある。','結果を分けるのは、角度、速さ、二つの質量の比。残る材料と、飛び去る材料の割合も変わる。','衝突の跡には、熱い表面が残る。惑星の大きさにも、中身にも、こうした出会いの歴史が刻まれている。']
+          readings=[('惑星','ワクセイ',0),('天体','テンタイ',1),('衝突','ショウトツ',0),('変形','ヘンケイ',0),('材料','ザイリョウ',3),('塊','カタマリ',0),('破片','ハヘン',0),('表面','ヒョウメン',3),('角度','カクド',1),('速さ','ハヤサ',1),('質量','シツリョウ',0),('割合','ワリアイ',0),('歴史','レキシ',0),('中身','ナカミ',2),('本体','ホンタイ',1)]
+          for word,kana,accent in readings:
+              requests.post(b+'/user_dict_word',params={'surface':word,'pronunciation':kana,'accent_type':accent,'priority':8},timeout=20).raise_for_status()
+          records=[]
+          for i,text in enumerate(texts,1):
+              r=requests.post(b+'/audio_query',params={'text':text,'speaker':sid},timeout=60);r.raise_for_status();q=r.json()
+              q.update(speedScale=1.01,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.0,prePhonemeLength=0.15,postPhonemeLength=0.25,outputSamplingRate=48000,outputStereo=False)
+              r=requests.post(b+'/synthesis',params={'speaker':sid},json=q,timeout=120);r.raise_for_status();p=Path('narration',f'{i:02d}.wav');p.write_bytes(r.content)
+              with av.open(str(p)) as a:
+                  duration=a.duration/av.time_base;frames=sum(1 for _ in a.decode(audio=0))
+              assert 2<duration<25 and frames>1
+              p.with_name(p.stem+'_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              records.append({'file':p.name,'text':text,'spoken_text':text,'duration':duration,'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'kana':q.get('kana'),'decoded_frames':frames})
+              print(p.name,duration,q.get('kana'))
+          Path('narration/retrieval.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          Path('narration/voice.json').write_text(json.dumps({'engine':'VOICEVOX','engine_version':requests.get(b+'/version').json(),'speaker':person,'selected_style_id':sid,'credit':'VOICEVOX:四国めたん','readings':readings},ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p038-original-narration
+          path: narration/
+          retention-days: 3
+      - name: Measure waveform word timing independently
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          m=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('narration').glob('*.wav')):
+              segs,info=m.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              d={'file':p.name,'duration':info.duration,'model':'large-v3-turbo','segments':[{'start':s.start,'end':s.end,'text':s.text,'words':[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in s.words]} for s in segs]}
+              p.with_name(p.stem+'_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2));print(p.name,[s['text'] for s in d['segments']])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p038-narration-with-timings
+          path: narration/
+          retention-days: 3
