@@ -1,0 +1,59 @@
+name: P038 original narration
+on:
+  push:
+    paths: ['.github/workflows/p038_narration_20261014.yml']
+permissions:
+  contents: read
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start voice engine
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+          python -m pip -q install requests
+      - name: Synthesize six segments
+        run: |
+          python - <<'PY'
+          import requests,json,time,hashlib,wave
+          from pathlib import Path
+          base='http://127.0.0.1:50021'
+          for k in range(120):
+              try:
+                  r=requests.get(base+'/speakers',timeout=5)
+                  if r.ok: break
+              except requests.RequestException: pass
+              time.sleep(2)
+          r.raise_for_status()
+          sp=next(s for s in r.json() if s['name']=='四国めたん')
+          sid=next(s['id'] for s in sp['styles'] if s['name']=='ノーマル')
+          texts=["二つの若い惑星が、衝突しようとしている。ぶつかれば、必ず一つの大きな世界になるんだろうか。","結果を分けるのは、出会う速さと角度。そして、互いの大きさ。まずは、ゆっくり、正面に近い衝突を見よう。","ぶつかった材料がまとまり、一つの大きな天体へ。でも、一部の破片は外へ飛び出す。全部が残るわけじゃない。","今度は、斜めから速くぶつかる例。同じ二つの天体でも、かすめた後に、別々のまま離れていくことがある。","削られた表面の材料は、破片として周囲に残る。くっついた量、逃げた量。成長するかどうかは、その行き先しだい。","惑星は、球を足し算して完成するわけじゃない。今ある形や材料にも、激しい出会いの歴史が刻まれている。"]
+          readings=[["惑星","ワクセイ",0],["衝突","ショウトツ",0],["破片","ハヘン",0],["合体","ガッタイ",0],["天体","テンタイ",0],["正面","ショウメン",0],["角度","カクド",1],["大きさ","オオキサ",0],["削られた","ケズラレタ",0],["材料","ザイリョウ",3]]
+          for w,k,a in readings:
+              requests.post(base+'/user_dict_word',params=dict(surface=w,pronunciation=k,accent_type=a,priority=8),timeout=25).raise_for_status()
+          root=Path('narration');root.mkdir(exist_ok=True)
+          records=[]
+          for i,text in enumerate(texts,1):
+              r=requests.post(base+'/audio_query',params=dict(text=text,speaker=sid),timeout=90);r.raise_for_status();q=r.json()
+              q.update(speedScale=1.01,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.0,prePhonemeLength=.15,postPhonemeLength=.25,outputSamplingRate=48000,outputStereo=False)
+              r=requests.post(base+'/synthesis',params=dict(speaker=sid),json=q,timeout=150);r.raise_for_status();wav=root/f'{i:02d}.wav';wav.write_bytes(r.content)
+              with wave.open(str(wav),'rb') as f:
+                 assert f.getframerate()==48000 and f.getnchannels()==1
+                 duration=f.getnframes()/f.getframerate()
+              assert 3<duration<18
+              (root/f'{i:02d}_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              records.append(dict(file=wav.name,text=text,seconds=duration,sha256=hashlib.sha256(r.content).hexdigest(),kana=q.get('kana')))
+              print(wav.name,round(duration,3),flush=True)
+          (root/'retrieval.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          (root/'voice.json').write_text(json.dumps(dict(engine='VOICEVOX',version=requests.get(base+'/version').json(),speaker='四国めたん',style='ノーマル',credit='VOICEVOX:四国めたん',readings=readings),ensure_ascii=False,indent=2))
+          
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p038-original-narration
+          path: narration/
+          retention-days: 3
