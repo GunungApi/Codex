@@ -1,0 +1,59 @@
+name: P039 original narration
+on:
+  push:
+    paths: ['.github/workflows/p039_narration_20261015.yml']
+permissions:
+  contents: read
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start voice engine
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+          python -m pip -q install requests
+      - name: Synthesize six segments
+        run: |
+          python - <<'PY'
+          import requests,json,time,hashlib,wave
+          from pathlib import Path
+          base='http://127.0.0.1:50021'
+          for k in range(120):
+              try:
+                  r=requests.get(base+'/speakers',timeout=5)
+                  if r.ok: break
+              except requests.RequestException: pass
+              time.sleep(2)
+          r.raise_for_status()
+          sp=next(s for s in r.json() if s['name']=='四国めたん')
+          sid=next(s['id'] for s in sp['styles'] if s['name']=='ノーマル')
+          texts=["この岩の世界。中まで、同じ材料だろうか。のぞいてみると、岩石の中に、金属が混ざっている。","衝突の熱や、放射性物質が出す熱。内部が十分に熱くなると、一部が溶け、材料が動けるようになる。","鉄を含む金属の、一粒を追おう。周りの溶けた岩石より密度が高く、中心へ向かって沈んでいく。","反対側の金属も、同じ中心へ。集まった金属が、核になっていく。重力が向かう先は、天体の内側だ。","周りには、岩石を多く含む層が残る。混ざっていた材料が、内側と外側に分かれる。これが、内部の分化。","外からは、一つの丸い世界。でも、その地下には、材料が移動した歴史がある。惑星は、集まった後も、内側で育っていく。"]
+          readings=[["岩石","ガンセキ",0],["放射性物質","ホウシャセイブッシツ",0],["一粒","ヒトツブ",0],["分化","ブンカ",0],["核","カク",1],["密度","ミツド",1],["重力","ジュウリョク",1],["金属","キンゾク",0],["衝突","ショウトツ",0],["天体","テンタイ",0]]
+          for w,k,a in readings:
+              requests.post(base+'/user_dict_word',params=dict(surface=w,pronunciation=k,accent_type=a,priority=8),timeout=25).raise_for_status()
+          root=Path('narration');root.mkdir(exist_ok=True)
+          records=[]
+          for i,text in enumerate(texts,1):
+              r=requests.post(base+'/audio_query',params=dict(text=text,speaker=sid),timeout=90);r.raise_for_status();q=r.json()
+              q.update(speedScale=1.01,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.0,prePhonemeLength=.15,postPhonemeLength=.25,outputSamplingRate=48000,outputStereo=False)
+              r=requests.post(base+'/synthesis',params=dict(speaker=sid),json=q,timeout=150);r.raise_for_status();wav=root/f'{i:02d}.wav';wav.write_bytes(r.content)
+              with wave.open(str(wav),'rb') as f:
+                 assert f.getframerate()==48000 and f.getnchannels()==1
+                 duration=f.getnframes()/f.getframerate()
+              assert 3<duration<18
+              (root/f'{i:02d}_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              records.append(dict(file=wav.name,text=text,seconds=duration,sha256=hashlib.sha256(r.content).hexdigest(),kana=q.get('kana')))
+              print(wav.name,round(duration,3),flush=True)
+          (root/'retrieval.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          (root/'voice.json').write_text(json.dumps(dict(engine='VOICEVOX',version=requests.get(base+'/version').json(),speaker='四国めたん',style='ノーマル',credit='VOICEVOX:四国めたん',readings=readings),ensure_ascii=False,indent=2))
+          
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p039-original-narration
+          path: narration/
+          retention-days: 3
