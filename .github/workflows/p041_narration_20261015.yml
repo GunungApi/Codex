@@ -1,0 +1,82 @@
+name: P041 narration and rendering check
+on:
+  push:
+    paths: ['.github/workflows/p041_narration_20261015.yml']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime and start inherited voice
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libegl1-mesa-dev libgl1-mesa-dri fonts-noto-cjk
+          python -m pip -q install requests numpy pillow moderngl==5.12.0 glcontext==3.0.0 faster-whisper
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+      - name: Generate original Japanese narration
+        run: |
+          mkdir -p p041/audio/raw p041/validation
+          python - <<'PY'
+          import requests,json,time,hashlib,wave,subprocess,platform
+          from pathlib import Path
+          import moderngl
+          root=Path('p041/audio/raw');base='http://127.0.0.1:50021'
+          ctx=moderngl.create_standalone_context(backend='egl',require=330)
+          fbo=ctx.simple_framebuffer((1080,1920),components=3,samples=4);fbo.use();fbo.clear(.04,.05,.06)
+          Path('p041/validation/runtime.json').write_text(json.dumps({'python':platform.python_version(),'gl':ctx.info,'native_resolution':[1080,1920],'samples':4},indent=2))
+          print('NATIVE_RENDER_CONTEXT_OK',ctx.info['GL_RENDERER'],flush=True)
+          for attempt in range(100):
+              try:
+                  r=requests.get(base+'/speakers',timeout=5)
+                  if r.ok:break
+              except requests.RequestException:pass
+              time.sleep(2)
+          r.raise_for_status()
+          person=next(s for s in r.json() if s['name']=='四国めたん')
+          sid=next(s['id'] for s in person['styles'] if s['name']=='ノーマル')
+          texts=['太陽が生まれる前から、五つの惑星が回っていた。ケプラー、よんよんよん。どれほど古いんだろう。','この星の年齢は、推定、およそ百十二億年。太陽系のおよそ四十六億年と、比べてみよう。','太陽が生まれた時点で、この星系は、すでにおよそ六十六億歳。地球の今の年齢よりも、長い時間だ。','惑星は五つとも、地球より小さい。内側の一つは、水星ほど。外側の一つも、金星より小さい。','しかも、五つとも、十日もかからず星を一周する。星のすぐ近くに、ぎゅっと集まった惑星系だ。','若い宇宙にも、小さな惑星の世界は育っていた。太陽系は、その長い歴史の、ずっと後から登場したんだ。']
+          readings=[('惑星','ワクセイ',0),('太陽系','タイヨウケイ',0),('太陽','タイヨウ',1),('星系','セイケイ',0),('水星','スイセイ',0),('金星','キンセイ',0),('地球','チキュウ',0),('年齢','ネンレイ',0),('百十二億年','ヒャクジュウニオクネン',5),('四十六億年','ヨンジュウロクオクネン',5),('六十六億歳','ロクジュウロクオクサイ',5),('十日','トオカ',0),('内側','ウチガワ',0),('外側','ソトガワ',0),('一周','イッシュウ',0)]
+          for word,kana,accent in readings:
+              requests.post(base+'/user_dict_word',params=dict(surface=word,pronunciation=kana,accent_type=accent,priority=8),timeout=20).raise_for_status()
+          records=[]
+          for i,text in enumerate(texts,1):
+              r=requests.post(base+'/audio_query',params=dict(text=text,speaker=sid),timeout=60);r.raise_for_status();q=r.json()
+              q.update(speedScale=1.01,pitchScale=-.015,intonationScale=1.08,volumeScale=1.,prePhonemeLength=.15,postPhonemeLength=.25,outputSamplingRate=48000,outputStereo=False)
+              r=requests.post(base+'/synthesis',params=dict(speaker=sid),json=q,timeout=120);r.raise_for_status();p=root/f'{i:02d}.wav';p.write_bytes(r.content)
+              with wave.open(str(p),'rb') as f:
+                  n=f.getnframes();sr=f.getframerate();assert sr==48000 and f.getnchannels()==1;assert len(f.readframes(n))==n*f.getsampwidth()
+              assert 4<n/sr<18
+              (root/f'{i:02d}_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              records.append(dict(file=p.name,text=text,duration=n/sr,samples=n,sha256=hashlib.sha256(r.content).hexdigest(),kana=q.get('kana')))
+              print(p.name,round(n/sr,4),q.get('kana'),flush=True)
+          (root/'retrieval.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          (root/'voice.json').write_text(json.dumps(dict(engine='VOICEVOX',version=requests.get(base+'/version').json(),speaker=person,style_id=sid,readings=readings,credit='VOICEVOX:四国めたん'),ensure_ascii=False,indent=2))
+          (root/'engine_image_digest.txt').write_text(subprocess.check_output(['docker','inspect','--format={{.Image}}','voicevox'],text=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p041-original-narration
+          path: p041/
+          retention-days: 7
+      - name: Independent recognition and word timing
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          model=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('p041/audio/raw').glob('*.wav')):
+              ss,info=model.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              d=dict(file=p.name,duration=info.duration,model='large-v3-turbo',segments=[dict(start=s.start,end=s.end,text=s.text,words=[dict(start=w.start,end=w.end,word=w.word,probability=w.probability) for w in s.words]) for s in ss])
+              (p.parent/f'{p.stem}_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2));print(p.name,[s['text'] for s in d['segments']],flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p041-narration-with-timings
+          path: p041/
+          retention-days: 7
