@@ -1,0 +1,146 @@
+name: P041 native film production
+on:
+  push:
+    paths: ['.github/workflows/p041_film_20261015.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install native rendering dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libegl1-mesa-dev libgl1-mesa-dri fonts-noto-cjk
+          python -m pip -q install numpy scipy pillow moderngl==5.12.0 glcontext==3.0.0 av trimesh requests
+      - uses: actions/download-artifact@v5
+        with:
+          name: p041-narration-with-timings
+          run-id: 38682568012
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: p041
+      - name: Original audio, edit timing, native frames, and difficult motion proof
+        env:
+          GH_STATUS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python p041_20261015/run_stage.py preflight
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p041-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: p041/
+          retention-days: 7
+          compression-level: 4
+  render:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shot: [0,1,2,3,4,5,6,8,9,10]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install renderer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libegl1-mesa-dev libgl1-mesa-dri fonts-noto-cjk
+          python -m pip -q install numpy pillow moderngl==5.12.0 glcontext==3.0.0 requests
+      - uses: actions/download-artifact@v5
+        with:
+          name: p041-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: p041
+      - name: Render one full-resolution shot
+        env:
+          GH_STATUS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python p041_20261015/run_stage.py shot_${{ matrix.shot }}
+      - name: Keep only the newly rendered shot
+        run: |
+          mkdir -p shot_output/clips shot_output/validation
+          SHOT=$(printf '%02d' '${{ matrix.shot }}')
+          cp "p041/clips/shot_${SHOT}.mp4" shot_output/clips/
+          cp "p041/validation/shot_${SHOT}.json" shot_output/validation/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p041-shot-${{ matrix.shot }}-${{ github.run_id }}
+          path: shot_output/
+          retention-days: 7
+          compression-level: 0
+  finish:
+    needs: [preflight,render]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install final verification dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk
+          python -m pip -q install numpy pillow av trimesh requests
+      - uses: actions/download-artifact@v5
+        with:
+          name: p041-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: p041
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: p041-shot-*-${{ github.run_id }}
+          merge-multiple: true
+          path: p041
+      - name: Preserve the exact proofed renderer in the editable source
+        run: cp p041/code/render.py p041_20261015/render.py
+      - name: Mux original sound, verify every frame, and package
+        env:
+          GH_STATUS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python p041_20261015/run_stage.py finish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p041-final-high-video
+          path: deliverables/heionreki_p041_v1_high.mp4
+          retention-days: 14
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p041-final-light-and-preview
+          path: |
+            deliverables/heionreki_p041_v1_light.mp4
+            deliverables/heionreki_p041_v1_age_preview.mp4
+          retention-days: 14
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p041-complete-production-and-subtitles
+          path: |
+            deliverables/heionreki_p041_v1_production.zip
+            deliverables/*.srt
+            deliverables/*.ass
+            deliverables/*.md
+          retention-days: 14
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p041-final-verification
+          path: |
+            p041/validation/
+            status.json
+            stage_status.json
+          retention-days: 14
+          compression-level: 4
