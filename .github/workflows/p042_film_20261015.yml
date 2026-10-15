@@ -1,0 +1,135 @@
+name: P042 native film production
+on:
+  push:
+    paths: ['.github/workflows/p042_film_20261015.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install native rendering dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libegl1-mesa-dev libgl1-mesa-dri fonts-noto-cjk
+          python -m pip -q install numpy scipy pillow moderngl==5.12.0 glcontext==3.0.0 av
+      - uses: actions/download-artifact@v5
+        with:
+          name: p042-original-narration-with-timings
+          run-id: 38725105385
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: p042/audio/raw
+      - name: Recover source and validate original pronunciations
+        run: python p042_20261015/bootstrap.py
+      - name: Align scenes to original speech and finish audio
+        run: python p042_20261015/prepare.py
+      - name: Native frame proofs and difficult water-state motion
+        run: python p042_20261015/render.py proof
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p042-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: p042/
+          retention-days: 14
+          compression-level: 4
+  render:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shot: [0,1,2,3,4,8,9,10,11]
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install renderer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libegl1-mesa-dev libgl1-mesa-dri fonts-noto-cjk
+          python -m pip -q install numpy pillow moderngl==5.12.0 glcontext==3.0.0
+      - uses: actions/download-artifact@v5
+        with:
+          name: p042-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: p042
+      - name: Render native shot
+        run: python p042/code/render.py shot ${{ matrix.shot }}
+      - name: Retain only this shot and its measurements
+        run: |
+          mkdir -p shot_output/clips shot_output/validation
+          SHOT=$(printf '%02d' '${{ matrix.shot }}')
+          cp "p042/clips/shot_${SHOT}.mp4" shot_output/clips/
+          cp "p042/validation/shot_${SHOT}.json" shot_output/validation/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p042-shot-${{ matrix.shot }}-${{ github.run_id }}
+          path: shot_output/
+          retention-days: 14
+          compression-level: 0
+  finish:
+    needs: [preflight,render]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install verification tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk
+          python -m pip -q install numpy pillow av
+      - uses: actions/download-artifact@v5
+        with:
+          name: p042-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: p042
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: p042-shot-*-${{ github.run_id }}
+          merge-multiple: true
+          path: p042
+      - name: Mux, verify every frame and sample stream, and package
+        run: python p042/code/finish.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p042-final-high-video
+          path: deliverables/heionreki_p042_v1_high.mp4
+          retention-days: 14
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p042-final-light-and-preview
+          path: |
+            deliverables/heionreki_p042_v1_light.mp4
+            deliverables/heionreki_p042_v1_water_preview.mp4
+          retention-days: 14
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p042-complete-production-and-subtitles
+          path: |
+            deliverables/heionreki_p042_v1_production.zip
+            deliverables/*.srt
+            deliverables/*.ass
+            deliverables/*.md
+          retention-days: 14
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p042-final-verification
+          path: |
+            p042/validation/
+            status.json
+          retention-days: 14
+          compression-level: 4
