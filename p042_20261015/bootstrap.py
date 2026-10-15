@@ -5,9 +5,12 @@ for p in ['assets','validation','reference','code','clips','audio/raw','captions
 src=Path('p041_20261015/prepare.py');shutil.copy2(src,HERE/'inherited_prepare.py')
 base=Path('p041_20261015/render.py').read_text().replace("ROOT=Path('p041')","ROOT=Path('p042')")
 (HERE/'base.py').write_text(base,encoding='utf-8')
-# Equal radius, equal camera distance: neither planet is accidentally larger in projection.
-p=HERE/'render.py';s=p.read_text();s=s.replace("eye=[2.2-.5*s,1.1,12.0+.55*s] if k=='opening' else [1.7+.65*s,1.25,12.55]","eye=[0.,1.1+.15*s,12.0+.55*s] if k=='opening' else [0.,1.25+.2*s,12.55]")
+# Equal radius, equal camera distance, with a safe frame margin around both silhouettes.
+p=HERE/'render.py';s=p.read_text();s=s.replace("eye=[2.2-.5*s,1.1,12.0+.55*s] if k=='opening' else [1.7+.65*s,1.25,12.55]","eye=[0.,1.1+.15*s,13.5+.55*s] if k=='opening' else [0.,1.25+.2*s,14.05]")
 p.write_text(s,encoding='utf-8')
+# Keep the full comment marker when extracting the inherited subtitle generator.
+p=HERE/'prepare.py';s=p.read_text();bad="sub=old.split('# Subtitle files')[1].split('# Keep the received PCM')[0]";good="sub='# Subtitle files'+old.split('# Subtitle files')[1].split('# Keep the received PCM')[0]"
+assert bad in s or good in s;s=s.replace(bad,good);p.write_text(s,encoding='utf-8')
 for p in HERE.glob('*.py'):py_compile.compile(str(p),doraise=True)
 raw=ROOT/'audio/raw';rec=json.loads((raw/'retrieval.json').read_text())
 def kana(x):return re.sub(r"[/_'、？。\s]",'',x)
