@@ -1,0 +1,73 @@
+name: P042 original narration
+on:
+  push:
+    paths: ['.github/workflows/p042_narration_20261015.yml']
+permissions:
+  contents: read
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start inherited Japanese voice engine
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+          python -m pip -q install requests faster-whisper
+      - name: Generate six original narration files
+        run: |
+          python - <<'PY'
+          import json,time,hashlib,wave,requests,subprocess
+          from pathlib import Path
+          base='http://127.0.0.1:50021'
+          for attempt in range(100):
+              try:
+                  r=requests.get(base+'/speakers',timeout=5)
+                  if r.ok: break
+              except requests.RequestException: pass
+              time.sleep(2)
+          r.raise_for_status()
+          person=next(s for s in r.json() if s['name']=='四国めたん')
+          sid=next(s['id'] for s in person['styles'] if s['name']=='ノーマル')
+          texts=['同じ大きさの惑星。でも、片方は氷、もう片方には海。何が、この違いを生むんだろう。','まずは、星から届く光。同じ星なら、距離が二倍になると、光の強さは四分の一になる。','次は、大気。雲は光の一部を跳ね返す。温室効果をもつ気体は、地面から出る熱を吸収し、再び放射する。','水が液体でいられるかは、温度と圧力しだい。同じ温度でも、圧力を下げると、沸騰することがある。','適切な大気のもとで、地表に液体の水を保てる距離の帯。それが、ハビタブルゾーン。','惑星の存在、海を保つ条件、生命の証拠。一つ分かるたびに、次の問いが生まれる。世界を知る旅は、ここから続く。']
+          readings=[('惑星','ワクセイ',0),('大気','タイキ',1),('液体','エキタイ',0),('気体','キタイ',0),('温室効果','オンシツコウカ',5),('吸収','キュウシュウ',0),('放射','ホウシャ',0),('圧力','アツリョク',2),('沸騰','フットウ',0),('地表','チヒョウ',0),('生命','セイメイ',1),('証拠','ショウコ',0),('二倍','ニバイ',0),('四分の一','ヨンブンノイチ',1),('ハビタブルゾーン','ハビタブルゾーン',6)]
+          for word,kana,accent in readings:
+              requests.post(base+'/user_dict_word',params=dict(surface=word,pronunciation=kana,accent_type=accent,priority=8),timeout=20).raise_for_status()
+          root=Path('narration');root.mkdir(exist_ok=True);records=[]
+          for i,text in enumerate(texts,1):
+              r=requests.post(base+'/audio_query',params=dict(text=text,speaker=sid),timeout=60);r.raise_for_status();q=r.json()
+              q.update(speedScale=1.01,pitchScale=-0.015,intonationScale=1.08,volumeScale=1.0,prePhonemeLength=0.15,postPhonemeLength=0.25,outputSamplingRate=48000,outputStereo=False)
+              r=requests.post(base+'/synthesis',params=dict(speaker=sid),json=q,timeout=120);r.raise_for_status();p=root/f'{i:02d}.wav';p.write_bytes(r.content)
+              with wave.open(str(p),'rb') as f:
+                  n=f.getnframes();sr=f.getframerate();assert sr==48000 and f.getnchannels()==1 and f.getsampwidth()==2;assert len(f.readframes(n))==n*2
+              (root/f'{i:02d}_query.json').write_text(json.dumps(q,ensure_ascii=False,indent=2))
+              records.append(dict(file=p.name,text=text,duration=n/sr,samples=n,sha256=hashlib.sha256(r.content).hexdigest(),kana=q.get('kana')))
+              print(p.name,n/sr,q.get('kana'),flush=True)
+          (root/'retrieval.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
+          (root/'voice.json').write_text(json.dumps(dict(engine='VOICEVOX',version=requests.get(base+'/version').json(),speaker='四国めたん',style='ノーマル',style_id=sid,credit='VOICEVOX:四国めたん',readings=readings),ensure_ascii=False,indent=2))
+          (root/'engine_image_digest.txt').write_text(subprocess.check_output(['docker','inspect','--format={{.Image}}','voicevox'],text=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p042-original-narration
+          path: narration/
+          retention-days: 7
+      - name: Independently measure real speech word times
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+          m=WhisperModel('large-v3-turbo',device='cpu',compute_type='int8',cpu_threads=4)
+          for p in sorted(Path('narration').glob('*.wav')):
+              segments,info=m.transcribe(str(p),language='ja',word_timestamps=True,beam_size=5,vad_filter=False)
+              d=dict(file=p.name,duration=info.duration,model='large-v3-turbo',segments=[dict(start=s.start,end=s.end,text=s.text,words=[dict(start=w.start,end=w.end,word=w.word,probability=w.probability) for w in s.words]) for s in segments])
+              (p.parent/f'{p.stem}_words.json').write_text(json.dumps(d,ensure_ascii=False,indent=2));print(p.name,[s['text'] for s in d['segments']],flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p042-narration-with-timings
+          path: narration/
+          retention-days: 7
