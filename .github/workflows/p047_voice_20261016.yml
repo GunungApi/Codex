@@ -1,0 +1,31 @@
+name: P047 original narration
+on:
+  push:
+    paths: ['.github/workflows/p047_voice_20261016.yml']
+permissions:
+  contents: read
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start established Japanese voice
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine:cpu-latest
+          python -m pip -q install requests faster-whisper
+      - name: Generate speech and independent waveform timings
+        run: python p047_20261016/voice.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p047-original-narration-with-timings
+          path: |
+            p047/audio/raw/
+            p047_20261016/voice_expanded.py
+          retention-days: 14
