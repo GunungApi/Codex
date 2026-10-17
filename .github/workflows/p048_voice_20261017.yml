@@ -1,0 +1,39 @@
+name: P048 original narration
+on:
+  push:
+    paths: ['.github/workflows/p048_voice_20261017.yml']
+permissions:
+  contents: read
+concurrency:
+  group: p048-original-narration-20261017
+  cancel-in-progress: false
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start the exact established Japanese voice engine
+        run: |
+          docker run -d --name voicevox -p '127.0.0.1:50021:50021' voicevox/voicevox_engine@sha256:eb8c7f46a7d01217d1ff2b6f018261faedeceded3cc756b4fbbf371791ad6c90
+          python -m pip -q install requests faster-whisper
+      - name: Generate six original speech waveforms and decoder timings
+        run: python p048_20261017/voice.py --stage synth
+      - name: Independently transcribe the actual waveforms
+        run: python p048_20261017/voice.py --stage asr
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p048-original-narration-with-timings
+          path: |
+            p048/audio/raw/
+            p048_20261017/voice.py
+            .github/workflows/p048_voice_20261017.yml
+          include-hidden-files: true
+          retention-days: 14
+
