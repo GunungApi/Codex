@@ -5,7 +5,7 @@ on:
     paths: ['production/p064_v2_film.py', 'production/p064_v2_refine.py', '.github/workflows/p064_v2_film_20261027.yml']
 permissions:
   contents: read
-  actions: write
+  actions: read
 concurrency:
   group: p064-v2-membrane-production
   cancel-in-progress: true
@@ -18,18 +18,14 @@ jobs:
       LP_NUM_THREADS: '3'
       OMP_NUM_THREADS: '3'
     steps:
-      - name: Stop only the superseded P064 setup run
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh api -X POST repos/GunungApi/Codex/actions/runs/40449667759/cancel || true
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Prepare rendering without refreshing package indexes
+      - name: Prepare native rendering and audio dependencies
         run: |
-          if ! command -v ffmpeg; then sudo timeout 120 apt-get install -y -qq ffmpeg; fi
-          ffmpeg -version | head -1
+          sudo timeout 120 apt-get install -y -qq ffmpeg libegl1 libegl-mesa0 libgl1-mesa-dri
+          ffmpeg -version
           python -m pip install --progress-bar off numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
           curl -fL --retry 2 --max-time 90 https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf -o "$RUNNER_TEMP/NotoSansCJKjp-Bold.otf"
           echo "P064_FONT=$RUNNER_TEMP/NotoSansCJKjp-Bold.otf" >> "$GITHUB_ENV"
