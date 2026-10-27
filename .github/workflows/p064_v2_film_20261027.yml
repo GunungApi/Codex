@@ -1,0 +1,59 @@
+name: P064 v2 membrane film
+on:
+  push:
+    branches: ['production/p064-v2-runtime-20261027']
+    paths: ['production/p064_v2_film.py', '.github/workflows/p064_v2_film_20261027.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  film:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '3'
+      OMP_NUM_THREADS: '3'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install image and audio dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libgl1-mesa-dri
+          python -m pip install numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+      - name: Restore authorized pinned public dependencies
+        uses: actions/download-artifact@v4
+        with:
+          name: p064-v2-voice-runtime
+          run-id: 40447758536
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: runtime
+      - name: Generate narration, native 3-D film, subtitles and verification
+        run: |
+          set -o pipefail
+          python -u production/p064_v2_film.py 2>&1 | tee production_console.log
+      - name: Preserve completed deliverables
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: heionreki-p064-v2-delivery
+          path: p064_v2/deliverables
+          compression-level: 0
+          retention-days: 30
+      - name: Preserve review evidence and recovery data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: heionreki-p064-v2-review
+          path: |
+            production_console.log
+            p064_v2/review
+            p064_v2/audio/raw
+            p064_v2/audio/engine.log
+            p064_v2/audio/pronunciation_review.json
+            p064_v2/timeline.json
+          compression-level: 3
+          retention-days: 14
