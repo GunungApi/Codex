@@ -1,0 +1,17 @@
+from pathlib import Path
+p=Path(__file__).with_name('p064_v2_film.py')
+s=p.read_text(encoding='utf-8')
+s=s.replace("self.font='/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc';assert Path(self.font).exists()", "self.font=os.environ.get('P064_FONT','/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc');assert Path(self.font).exists()")
+s=s.replace("x=(i-3)*.77;offset=", "x=(i-3)*(.77+.23*smooth(u,.48,.95));offset=")
+s=s.replace("r.lipid(head,[.10*np.sin(t+i),-1,.04],1.3,phase=t*.8+i)", "r.lipid(head,[.10*np.sin(t+i),-1,.04],1.3+(1.0 if i==3 else -.20)*smooth(u,.48,.95),phase=t*.8+i)")
+s=s.replace("head=np.array([x,center[1]+layer*1.03,z]);direction=np.array([.08*np.sin(t+i+j),-layer,.03*np.cos(t+j)])", "head=np.array([x,center[1]+layer*(1.36-.33*smooth(u,.02,.45)),z]);angle=.52*(1-smooth(u,.02,.55));direction=np.array([np.sin(angle),-layer*np.cos(angle),.02])")
+s=s.replace("phase=t*.4,tail_len=.69)", "phase=t*.4,tail_len=.60+.28*smooth(u,split,.97))")
+s=s.replace("b=center+np.array([-rad*sx*.83,.48*np.sin(i),.46*np.cos(i)])", "b=center+rad*sc*unit([-1.,.30*np.sin(i),.30*np.cos(i)])")
+s=s.replace("for i in range(5):\n   f=(u*1.5+i*.21)%1.;xx=-3.5+7*f;y=center[1]+(-.9+i*.46);p=np.array([xx,y,.35]);r.ball(p,.105,BLUE,rough=.12,emit=.2)", "for i in range(4):\n   f=(u*1.5+(i%2)*.48)%1.;xx=(-3.5+7*f)*(1 if i<2 else -1);y=center[1]+(-1.15 if i<2 else 1.15);p=np.array([xx,y,.55]);r.ball(p,.105,BLUE,rough=.12,emit=.2)")
+s=s.replace("p=c+[-2.3+4.6*f,-.55+i*.55,.35]", "p=c+[(-2.3+4.6*f)*(1 if i%2==0 else -1),(-.85 if i%2==0 else .85),.55]")
+s=s.replace("emit=emphasis*.25", "emit=emphasis*.8")
+s=s.replace("for(int i=0;i<24;i++)", "for(int i=0;i<12;i++)")
+# Preserve the original narration after synthesis, and avoid re-synthesizing it on a render-only retry.
+s=s.replace("timeline,narration=voice();music(timeline,narration);video,report=render(timeline);finalise(timeline,video,report)", "\n if (ROOT/'timeline.json').exists() and (ROOT/'audio/narration.wav').exists():\n  timeline=json.loads((ROOT/'timeline.json').read_text());narration,_=sf.read(ROOT/'audio/narration.wav',dtype='float32')\n else:timeline,narration=voice()\n music(timeline,narration);video,report=render(timeline);finalise(timeline,video,report)")
+p.write_text(s,encoding='utf-8')
+print('P064 refinement applied: assembly, full surface insertion, separated tracer lanes and font dependency.')
