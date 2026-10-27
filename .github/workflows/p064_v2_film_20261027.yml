@@ -2,66 +2,130 @@ name: P064 v2 membrane film
 on:
   push:
     branches: ['production/p064-v2-runtime-20261027']
-    paths: ['production/p064_v2_film.py', 'production/p064_v2_refine.py', '.github/workflows/p064_v2_film_20261027.yml']
+    paths: ['production/p064_v2*.py', 'production/p064_prepare.sh', '.github/workflows/p064_v2_film_20261027.yml']
 permissions:
   contents: read
   actions: read
 concurrency:
   group: p064-v2-membrane-production
   cancel-in-progress: true
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
 jobs:
-  film:
+  narration:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    env:
-      LIBGL_ALWAYS_SOFTWARE: '1'
-      LP_NUM_THREADS: '3'
-      OMP_NUM_THREADS: '3'
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Prepare native rendering and audio dependencies
-        run: |
-          sudo timeout 120 apt-get install -y -qq ffmpeg libegl1 libegl-mesa0 libgl1-mesa-dri
-          ffmpeg -version
-          python -m pip install --progress-bar off numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
-          curl -fL --retry 2 --max-time 90 https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf -o "$RUNNER_TEMP/NotoSansCJKjp-Bold.otf"
-          echo "P064_FONT=$RUNNER_TEMP/NotoSansCJKjp-Bold.otf" >> "$GITHUB_ENV"
-          python -c "import moderngl; c=moderngl.create_standalone_context(backend='egl'); print(c.info['GL_RENDERER'])"
-      - name: Restore authorized pinned public dependencies
-        uses: actions/download-artifact@v4
+      - run: bash production/p064_prepare.sh
+      - uses: actions/download-artifact@v4
         with:
           name: p064-v2-voice-runtime
           run-id: 40447758536
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: runtime
-      - name: Generate narration, native 3-D film, subtitles and verification
+      - name: Synthesize corrected reading and master sound
         run: |
           set -o pipefail
-          python production/p064_v2_refine.py
-          python -u production/p064_v2_film.py 2>&1 | tee production_console.log
-      - name: Preserve completed deliverables
+          python -u production/p064_v2_pipeline.py voice 2>&1 | tee voice_console.log
+      - uses: actions/upload-artifact@v4
         if: success()
-        uses: actions/upload-artifact@v4
+        with:
+          name: p064-v2-audio-final
+          path: |
+            p064_v2/audio
+            p064_v2/timeline.json
+            p064_v2/source/requirements-lock.txt
+          compression-level: 3
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: p064-v2-audio-diagnostic
+          path: |
+            voice_console.log
+            p064_v2/audio/engine.log
+          retention-days: 3
+  shot:
+    needs: narration
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        scene: [0,1,2,3,4,5,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p064_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p064-v2-audio-final
+          path: p064_v2
+      - name: Render native 1080 by 1920 shot with boundary and projection checks
+        run: python -u production/p064_v2_pipeline.py shot ${{ matrix.scene }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p064-v2-shot-${{ matrix.scene }}
+          path: |
+            p064_v2/render
+            p064_v2/review
+          compression-level: 0
+          retention-days: 14
+  assemble:
+    needs: shot
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p064_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p064-v2-audio-final
+          path: p064_v2
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p064-v2-shot-*
+          merge-multiple: true
+          path: p064_v2
+      - name: Assemble, verify, and package all deliverables
+        run: |
+          set -o pipefail
+          cp production/p064_v2_pipeline.py p064_v2/source/
+          python -u production/p064_v2_pipeline.py assemble 2>&1 | tee assembly_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: heionreki-p064-v2-delivery
           path: p064_v2/deliverables
           compression-level: 0
           retention-days: 30
-      - name: Preserve review evidence and recovery data
-        if: always()
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
+        if: success()
         with:
-          name: heionreki-p064-v2-review
+          name: heionreki-p064-v2-preview
+          path: p064_v2/deliverables/heionreki_p064_v2_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p064-v2-final-review
           path: |
-            production_console.log
+            assembly_console.log
             p064_v2/review
-            p064_v2/audio/raw
-            p064_v2/audio/narration.wav
-            p064_v2/audio/engine.log
-            p064_v2/audio/pronunciation_review.json
             p064_v2/timeline.json
           compression-level: 3
           retention-days: 14
