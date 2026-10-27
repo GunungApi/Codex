@@ -1,0 +1,52 @@
+name: P064 v2 public production dependencies
+on:
+  push:
+    branches: ['production/p064-v2-runtime-20261027']
+    paths: ['.github/workflows/p064_v2_runtime_20261027.yml']
+permissions:
+  contents: read
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Download rendering wheels
+        run: |
+          mkdir -p wheels runtime
+          python -m pip download moderngl==5.12.0 glcontext==3.0.0 --python-version 3.13 --platform manylinux_2_17_x86_64 --implementation cp --abi cp313 --only-binary=:all: --dest wheels
+      - name: Preserve rendering wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: p064-v2-render-wheels
+          path: wheels
+          retention-days: 3
+      - name: Download verified official speech runtime ranges
+        run: |
+          python - <<'PY'
+          import urllib.request,hashlib,pathlib,json,concurrent.futures
+          root=pathlib.Path('runtime')
+          url='https://github.com/VOICEVOX/voicevox_engine/releases/download/0.25.2/voicevox_engine-linux-cpu-x64-0.25.2.vvpp'
+          jobs=[('engine_range_0.bin',url,0,129169125,'4da9d1e2dbb883d7a9732d3232e50f7a1e726d744d24b278f5dedeacbfd89141'),('engine_range_1.bin',url,1689641293,1911613160,'839b6f1b1846157fee6d680b083741ece4e31045a31e9952bb1441773b0cbd2e'),('voicevox_core_0.16.1.zip','https://github.com/VOICEVOX/voicevox_core/releases/download/0.16.1/voicevox_core-linux-x64-0.16.1.zip',None,None,'d630d47e8c248d793933bea3eaa894aa96de70c0712ee1e45fd49b50ad9cad46')]
+          def acquire(j):
+            name,url,a,b,digest=j
+            headers={'User-Agent':'HEION-P064-v2-dependency-recovery'}
+            if a is not None: headers['Range']=f'bytes={a}-{b}'
+            with urllib.request.urlopen(urllib.request.Request(url,headers=headers),timeout=180) as response:
+              if a is not None:
+                assert response.status==206
+                assert response.headers['Content-Range'].startswith(f'bytes {a}-{b}/')
+              data=response.read()
+            assert hashlib.sha256(data).hexdigest()==digest,name
+            (root/name).write_bytes(data)
+            return {'name':name,'bytes':len(data),'sha256':digest,'source':url}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool: result=list(pool.map(acquire,jobs))
+          (root/'acquisition.json').write_text(json.dumps(result,indent=2))
+          print(json.dumps(result,indent=2))
+          PY
+      - name: Preserve verified speech runtime cache
+        uses: actions/upload-artifact@v4
+        with:
+          name: p064-v2-voice-runtime
+          path: runtime
+          compression-level: 0
+          retention-days: 3
