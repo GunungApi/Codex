@@ -2,7 +2,7 @@ name: P067 Orwell formation film
 on:
   push:
     branches: ['production/p067-v1-film-20261028']
-    paths: ['production/p067*.py', '.github/workflows/p067_film_20261028.yml']
+    paths: ['production/p067*.py', 'production/polish_orwell_067.py', 'production/prepare_orwell_067.sh', '.github/workflows/p067_film_20261028.yml']
 permissions:
   contents: read
   actions: read
@@ -22,23 +22,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Bounded production environment setup
-        run: |
-          sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067-apt.log 2>&1 || { sudo timeout 100 apt-get update -qq; sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri; }
-          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
-          python -m py_compile production/p067_film.py
-          mkdir -p p067_v1/source
-          python -m pip freeze > p067_v1/source/requirements-lock.txt
+      - name: Prepare trusted renderer and Japanese typography
+        run: bash production/prepare_orwell_067.sh
       - uses: actions/download-artifact@v4
         with:
           name: p064-v2-voice-runtime
           run-id: 40447758536
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: runtime
-      - name: Generate pronunciation-reviewed narrated timeline and sound
+      - name: Correct reading, generate narrated timeline and original score
         run: |
           set -o pipefail
           python -u production/p067_film.py voice 2>&1 | tee voice_console.log
+      - name: Test all ten scene designs and camera clearance
+        run: |
+          set -o pipefail
+          python -u production/p067_film.py preview 2>&1 | tee preflight_console.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -51,37 +50,17 @@ jobs:
             p067_v1/review
           compression-level: 3
           retention-days: 30
-  preflight:
-    needs: narration
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Prepare native renderer
-        run: |
-          sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067-apt.log 2>&1 || { sudo timeout 100 apt-get update -qq; sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri; }
-          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
-      - uses: actions/download-artifact@v4
-        with:
-          name: p067-v1-audio
-          path: p067_v1
-      - name: Test ten scene designs and camera clearance
-        run: |
-          set -o pipefail
-          python -u production/p067_film.py preview 2>&1 | tee preflight_console.log
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: failure()
         with:
-          name: p067-v1-preflight
+          name: p067-v1-initial-diagnostic
           path: |
-            p067_v1/review
+            voice_console.log
             preflight_console.log
-          retention-days: 30
+            p067_v1/review
+          retention-days: 7
   shot:
-    needs: preflight
+    needs: narration
     runs-on: ubuntu-latest
     timeout-minutes: 18
     strategy:
@@ -94,10 +73,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Prepare bounded renderer
-        run: |
-          sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067-apt.log 2>&1 || { sudo timeout 100 apt-get update -qq; sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri; }
-          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+      - name: Prepare native renderer
+        run: bash production/prepare_orwell_067.sh
       - uses: actions/download-artifact@v4
         with:
           name: p067-v1-audio
@@ -123,9 +100,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Prepare finishing environment
-        run: |
-          sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067-apt.log 2>&1 || { sudo timeout 100 apt-get update -qq; sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri; }
-          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+        run: bash production/prepare_orwell_067.sh
       - uses: actions/download-artifact@v4
         with:
           name: p067-v1-audio
@@ -135,9 +110,10 @@ jobs:
           pattern: p067-v1-shot-*
           merge-multiple: true
           path: p067_v1
-      - name: Finish, decode both movies, measure loudness and package
+      - name: Finish, decode both movies, measure and package
         run: |
           set -o pipefail
+          cp production/prepare_orwell_067.sh production/polish_orwell_067.py p067_v1/source/
           python -u production/p067_film.py assemble 2>&1 | tee final_console.log
       - uses: actions/upload-artifact@v4
         if: success()
