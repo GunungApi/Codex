@@ -1,0 +1,125 @@
+name: P066 refined delivery
+on:
+  push:
+    branches: ['production/p066-v1-film-20261028']
+    paths: ['production/refine_p066.py', '.github/workflows/p066_refine_20261028.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p066-refined-delivery
+  cancel-in-progress: true
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+jobs:
+  shot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        scene: [1,2,3,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare renderer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p066-refine-apt.log 2>&1
+          python -m pip install --quiet numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: p066-v1-audio
+          run-id: 40670253054
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: recovered
+      - name: Retain original voice and apply refinements
+        run: |
+          cp -a recovered/p066_v1 .
+          python production/refine_p066.py
+          python -m py_compile production/p066_film.py
+      - name: Render corrected scene
+        run: |
+          set -o pipefail
+          python -u production/p066_film.py shot ${{ matrix.scene }} 2>&1 | tee render_console.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p066-refined-shot-${{ matrix.scene }}
+          path: |
+            p066_v1/render
+            p066_v1/review
+            render_console.log
+          compression-level: 0
+          retention-days: 30
+  assemble:
+    needs: shot
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare finishing environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p066-refine-apt.log 2>&1
+          python -m pip install --quiet numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: p066-v1-audio
+          run-id: 40670253054
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: recovered_audio
+      - run: cp -a recovered_audio/p066_v1 .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p066-v1-shot-*
+          run-id: 40670253054
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-multiple: true
+          path: p066_v1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p066-refined-shot-*
+          merge-multiple: false
+          path: corrected
+      - name: Install corrected shots and original production code
+        run: |
+          for d in corrected/p066-refined-shot-*; do cp -a "$d/p066_v1/." p066_v1/; done
+          python production/refine_p066.py
+          cp production/refine_p066.py p066_v1/source/
+      - name: Finish and enforce all-frame clearance checks
+        run: |
+          set -o pipefail
+          python -u production/p066_film.py assemble 2>&1 | tee final_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p066-v1-final-delivery
+          path: p066_v1/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p066-v1-final-preview
+          path: p066_v1/deliverables/heionreki_p066_v1_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p066-v1-final-review
+          path: |
+            p066_v1/review
+            p066_v1/timeline.json
+            final_console.log
+          compression-level: 3
+          retention-days: 30
