@@ -1,0 +1,131 @@
+name: P065 direct file delivery
+on:
+  push:
+    branches: ['production/p065-geochemistry-20261028']
+    paths: ['.github/workflows/p065_direct_delivery_20261028.yml']
+permissions:
+  contents: read
+  actions: read
+env:
+  SOURCE_RUN: '40628563354'
+jobs:
+  visual_review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait for completed native preflight pictures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import os,time,json,urllib.request
+          url='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['SOURCE_RUN']+'/artifacts?per_page=100'
+          for i in range(180):
+            q=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(q) as f:r=json.load(f)
+            if any(a['name']=='p065-preflight-frames' for a in r['artifacts']):break
+            time.sleep(5)
+          else:raise RuntimeError('Preflight artifact was not available during this run.')
+          PY
+      - uses: actions/download-artifact@v8
+        with:
+          name: p065-preflight-frames
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+          path: preflight
+      - name: Prepare readable review images
+        run: |
+          python -m pip install --quiet pillow
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          fs=sorted(Path('preflight').rglob('scene_*.jpg'))
+          assert len(fs)>=20,len(fs)
+          chosen=[]
+          for s in [0,1,2,3,4,5,6,7,8,9]:
+            scene=[p for p in fs if p.name.startswith('scene_'+str(s).zfill(2)+'_')]
+            chosen.append(scene[len(scene)//2])
+          sheet=Image.new('RGB',(1080,2560),(7,17,25))
+          for i,p in enumerate(chosen):sheet.paste(Image.open(p).resize((270,480)),((i%4)*270,(i//4)*480))
+          sheet=sheet.crop((0,0,1080,1440));sheet.save('p065_preflight_sheet.jpg',quality=94)
+          Image.open(chosen[3]).save('p065_mineral_preview.png')
+          Image.open(chosen[6]).save('p065_comparison_preview.png')
+          for p in sorted(Path('preflight').rglob('*states.json')):
+            import json
+            q=json.loads(p.read_text());g=[x['minimum_material_gap_screen_px'] for x in q if x['minimum_material_gap_screen_px'] is not None]
+            print(p.name,'minimum screen clearance',min(g) if g else None)
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          path: p065_preflight_sheet.jpg
+          archive: false
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        with:
+          path: p065_mineral_preview.png
+          archive: false
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        with:
+          path: p065_comparison_preview.png
+          archive: false
+          retention-days: 14
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for verified production bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import os,time,json,urllib.request
+          url='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['SOURCE_RUN']+'/artifacts?per_page=100'
+          for i in range(240):
+            q=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(q) as f:r=json.load(f)
+            if any(a['name']=='heionreki-p065-v1-delivery' for a in r['artifacts']):break
+            time.sleep(5)
+          else:raise RuntimeError('Final delivery not available during this run.')
+          PY
+      - uses: actions/download-artifact@v8
+        with:
+          name: heionreki-p065-v1-delivery
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ github.token }}
+          path: delivery
+      - uses: actions/upload-artifact@v7
+        with:
+          path: delivery/heionreki_p065_v1_high_1080x1920.mp4
+          archive: false
+          retention-days: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          path: delivery/heionreki_p065_v1_light_720x1280.mp4
+          archive: false
+          retention-days: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          path: delivery/heionreki_p065_v1_production.zip
+          archive: false
+          retention-days: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          path: delivery/heionreki_p065_v1_script_and_sources.txt
+          archive: false
+          retention-days: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          path: delivery/heionreki_p065_v1_ja.ass
+          archive: false
+          retention-days: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          path: delivery/heionreki_p065_v1_ja.srt
+          archive: false
+          retention-days: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          path: delivery/heionreki_p065_v1_en.srt
+          archive: false
+          retention-days: 30
