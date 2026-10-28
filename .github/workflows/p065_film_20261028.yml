@@ -1,0 +1,134 @@
+name: P065 chemical differences film
+on:
+  push:
+    branches: ['production/p065-geochemistry-20261028']
+    paths: ['production/p065*.py', '.github/workflows/p065_film_20261028.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p065-film-20261028
+  cancel-in-progress: true
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p064_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p064-v2-voice-runtime
+          run-id: 40447758536
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: runtime
+      - name: Generate and inspect narration
+        run: |
+          set -o pipefail
+          python -u production/p065_film.py voice 2>&1 | tee voice_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: p065-audio
+          path: |
+            p065_v1/audio
+            p065_v1/timeline.json
+            p065_v1/docs
+          compression-level: 3
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p065-voice-review
+          path: |
+            voice_console.log
+            p065_v1/audio/pronunciation_review.json
+            p065_v1/timeline.json
+          retention-days: 14
+  shots:
+    needs: narration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        scene: [0,1,2,3,4,5,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p064_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p065-audio
+          path: p065_v1
+      - name: Render native 3D scene and check symbol separation
+        run: |
+          set -o pipefail
+          python -u production/p065_film.py shot ${{ matrix.scene }} 2>&1 | tee shot.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p065-shot-${{ matrix.scene }}
+          path: |
+            p065_v1/render
+            p065_v1/review
+            shot.log
+          compression-level: 0
+          retention-days: 14
+  assemble:
+    needs: shots
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p064_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p065-audio
+          path: p065_v1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p065-shot-*
+          merge-multiple: true
+          path: p065_v1
+      - name: Finalize, decode, measure and package
+        run: |
+          set -o pipefail
+          python -u production/p065_film.py assemble 2>&1 | tee assembly_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p065-v1-delivery
+          path: p065_v1/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p065-v1-preview
+          path: p065_v1/deliverables/heionreki_p065_v1_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p065-v1-review
+          path: |
+            assembly_console.log
+            p065_v1/review
+            p065_v1/timeline.json
+          compression-level: 3
+          retention-days: 14
