@@ -1,0 +1,165 @@
+name: P067 Orwell formation film
+on:
+  push:
+    branches: ['production/p067-v1-film-20261028']
+    paths: ['production/p067*.py', '.github/workflows/p067_film_20261028.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p067-v1-film
+  cancel-in-progress: true
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Bounded production environment setup
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067-apt.log 2>&1 || { sudo timeout 100 apt-get update -qq; sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+          python -m py_compile production/p067_film.py
+          mkdir -p p067_v1/source
+          python -m pip freeze > p067_v1/source/requirements-lock.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: p064-v2-voice-runtime
+          run-id: 40447758536
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: runtime
+      - name: Generate pronunciation-reviewed narrated timeline and sound
+        run: |
+          set -o pipefail
+          python -u production/p067_film.py voice 2>&1 | tee voice_console.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p067-v1-audio
+          path: |
+            p067_v1/audio
+            p067_v1/timeline.json
+            p067_v1/docs
+            p067_v1/source
+            p067_v1/review
+          compression-level: 3
+          retention-days: 30
+  preflight:
+    needs: narration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare native renderer
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067-apt.log 2>&1 || { sudo timeout 100 apt-get update -qq; sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          path: p067_v1
+      - name: Test ten scene designs and camera clearance
+        run: |
+          set -o pipefail
+          python -u production/p067_film.py preview 2>&1 | tee preflight_console.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p067-v1-preflight
+          path: |
+            p067_v1/review
+            preflight_console.log
+          retention-days: 30
+  shot:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        scene: [0,1,2,3,4,5,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare bounded renderer
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067-apt.log 2>&1 || { sudo timeout 100 apt-get update -qq; sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          path: p067_v1
+      - name: Render native landscape and verify camera and text bounds
+        run: python -u production/p067_film.py shot ${{ matrix.scene }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p067-v1-shot-${{ matrix.scene }}
+          path: |
+            p067_v1/render
+            p067_v1/review
+          compression-level: 0
+          retention-days: 30
+  assemble:
+    needs: shot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare finishing environment
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067-apt.log 2>&1 || { sudo timeout 100 apt-get update -qq; sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          path: p067_v1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p067-v1-shot-*
+          merge-multiple: true
+          path: p067_v1
+      - name: Finish, decode both movies, measure loudness and package
+        run: |
+          set -o pipefail
+          python -u production/p067_film.py assemble 2>&1 | tee final_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p067-v1-final-delivery
+          path: p067_v1/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p067-v1-final-preview
+          path: p067_v1/deliverables/heionreki_p067_v1_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p067-v1-final-review
+          path: |
+            p067_v1/review
+            p067_v1/timeline.json
+            final_console.log
+          compression-level: 3
+          retention-days: 30
