@@ -2,7 +2,7 @@ name: P067 v3 basalt and spatial time
 on:
   push:
     branches: ['production/p067-v3-rocktime-20261028']
-    paths: ['production/p067v3_rocktime.py', '.github/workflows/p067_v3_rocktime_20261028.yml']
+    paths: ['production/p067v3*.py', '.github/workflows/p067_v3_rocktime_20261028.yml']
 permissions:
   contents: read
   actions: read
@@ -29,20 +29,20 @@ jobs:
           python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0
           curl -fsSL --retry 2 --max-time 80 https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf -o "$RUNNER_TEMP/NotoSansCJKjp-Bold.otf"
           echo "P067_FONT=$RUNNER_TEMP/NotoSansCJKjp-Bold.otf" >> "$GITHUB_ENV"
-          python -m py_compile production/p067v3_rocktime.py
+          python -m py_compile production/p067v3_rocktime.py production/p067v3_phototexture.py
       - uses: actions/download-artifact@v4
         with:
           name: p067-v1-audio
           run-id: 40693127363
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: recovered_audio
-      - name: Recover exact approved narration
-        run: python production/p067v3_rocktime.py prepare
+      - name: Recover approved narration and licensed rock material
+        run: python production/p067v3_phototexture.py prepare
       - name: Test texture, labels, camera clearances and continuous motion
         run: |
           set -o pipefail
-          python -u production/p067v3_rocktime.py preview 2>&1 | tee preflight_console.log
-          python -u production/p067v3_rocktime.py testclip 2>&1 | tee testclip_console.log
+          python -u production/p067v3_phototexture.py preview 2>&1 | tee preflight_console.log
+          python -u production/p067v3_phototexture.py testclip 2>&1 | tee testclip_console.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -51,6 +51,7 @@ jobs:
             p067_v3/render
             p067_v3/review
             p067_v3/assets
+            p067_v3/docs
           retention-days: 30
           compression-level: 1
   shot:
@@ -79,10 +80,16 @@ jobs:
           run-id: 40693127363
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: recovered_audio
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v3-preflight
+          path: inherited_preflight
       - name: Render native shot with terrain collision checks
         run: |
-          python production/p067v3_rocktime.py prepare
-          python -u production/p067v3_rocktime.py shot ${{ matrix.scene }}
+          mkdir -p p067_v3/assets
+          cp -a inherited_preflight/assets/. p067_v3/assets/
+          python production/p067v3_phototexture.py prepare
+          python -u production/p067v3_phototexture.py shot ${{ matrix.scene }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -119,12 +126,12 @@ jobs:
           run-id: 40698801062
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: original_preview
-      - name: Restore unchanged sound and timing
-        run: python production/p067v3_rocktime.py prepare
       - uses: actions/download-artifact@v4
         with:
           name: p067-v3-preflight
           path: p067_v3
+      - name: Restore unchanged sound and timing
+        run: python production/p067v3_phototexture.py prepare
       - uses: actions/download-artifact@v4
         with:
           pattern: p067-v3-shot-*
@@ -134,7 +141,7 @@ jobs:
         run: |
           set -o pipefail
           python -m pip freeze > p067_v3/source/requirements-lock.txt
-          python -u production/p067v3_rocktime.py assemble 2>&1 | tee final_console.log
+          python -u production/p067v3_phototexture.py assemble 2>&1 | tee final_console.log
       - uses: actions/upload-artifact@v4
         if: success()
         with:
