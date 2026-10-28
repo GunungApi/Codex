@@ -1,0 +1,97 @@
+name: P066 bounded final assembly
+on:
+  push:
+    branches: ['production/p066-v1-film-20261028']
+    paths: ['.github/workflows/p066_finish_20261028.yml']
+permissions:
+  contents: read
+  actions: read
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Use bounded dependency installation
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri > /tmp/p066-apt.log 2>&1 || { sudo timeout 100 apt-get update -qq; sudo timeout 100 apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: p066-v1-audio
+          run-id: 40670253054
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: recovered_audio
+      - run: cp -a recovered_audio/p066_v1 .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p066-v1-shot-*
+          run-id: 40670253054
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-multiple: true
+          path: p066_v1
+      - name: Recover completed current shots
+        uses: actions/download-artifact@v4
+        with:
+          pattern: p066-refined-shot-*
+          run-id: 40671758816
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-multiple: false
+          path: corrected
+      - name: Recover matching completed lineage shot eight
+        uses: actions/download-artifact@v4
+        with:
+          name: p066-refined-shot-8
+          run-id: 40670951537
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: lineage8
+      - name: Recover matching completed lineage shot nine
+        uses: actions/download-artifact@v4
+        with:
+          name: p066-refined-shot-9
+          run-id: 40670951537
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: lineage9
+      - name: Install polished pictures with unchanged voice
+        run: |
+          for i in 1 2 3 7; do test -d "corrected/p066-refined-shot-$i/p066_v1"; cp -a "corrected/p066-refined-shot-$i/p066_v1/." p066_v1/; done
+          cp -a lineage8/p066_v1/. p066_v1/
+          cp -a lineage9/p066_v1/. p066_v1/
+          python production/refine_p066.py
+          cp production/refine_p066.py p066_v1/source/
+          python -m pip freeze > p066_v1/source/requirements-lock.txt
+      - name: Assemble and enforce final checks
+        run: |
+          set -o pipefail
+          python -u production/p066_film.py assemble 2>&1 | tee final_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p066-v1-final-delivery
+          path: p066_v1/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p066-v1-final-preview
+          path: p066_v1/deliverables/heionreki_p066_v1_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p066-v1-final-review
+          path: |
+            p066_v1/review
+            p066_v1/timeline.json
+            final_console.log
+          compression-level: 3
+          retention-days: 30
