@@ -1,0 +1,32 @@
+{
+  "episode": "heionreki_p067",
+  "revision": "v4",
+  "review_date_jst": "2026-10-29",
+  "completed_render_run": 40727774935,
+  "final_encoded_stills_reviewed": 20,
+  "final_encoded_frame_names": ["encoded_00", "encoded_01", "encoded_02", "encoded_03", "encoded_04", "encoded_05", "encoded_06", "encoded_07", "encoded_08", "encoded_09", "encoded_10", "encoded_11", "encoded_12", "encoded_13", "encoded_14", "encoded_15", "encoded_16", "encoded_17", "encoded_18", "encoded_19"],
+  "earlier_v4_preflight_stills_reviewed": 28,
+  "earlier_v3_comparison_stills_reviewed": 4,
+  "method": "Actual encoded-frame images were placed into a private review document, converted to PDF, and inspected as rendered page images. The temporary review documents were not shared publicly.",
+  "observations": [
+    "Opening and eruption frames show the interior caldera and molten lake, rather than only a foreground rock wall.",
+    "Dark patches are visible within the glowing molten surface. Rock relief and channels remain discernible, although haze still softens the close-up contrast.",
+    "Ballistic molten fragments and their short trails are visible above the crater in the opening and eruption frames.",
+    "The first chronology frame shows the advancing illuminated path without the 3.4-billion-year headline; the next sampled frame shows the lit interval and the headline. Endpoint labels remain distinct and readable.",
+    "The sampled ocean-formation frames change from an active rocky globe with a small water area to a predominantly blue ocean globe.",
+    "The coastal foam is broken into irregular patches rather than a continuous white band; the foreground rock leaves the main volcanic silhouette visible.",
+    "The same volcanic silhouette and surface channels recur across the coastal and high-angle views.",
+    "The final sampled frame is underwater with readable terrain, light shafts and the closing subtitle.",
+    "All 20 sampled Japanese subtitle blocks fit inside the image, retain sensible one- or two-line breaks, and are legible at the reviewed size."
+  ],
+  "continuous_video_playback_reviewed": false,
+  "auditory_listening_performed": false,
+  "pronunciation_check": "Inherited corrected VOICEVOX query readings, including Orion arm as オリオンワン, were checked against the recorded kana. This is a data check, not ear listening.",
+  "audio_preservation": "Final assembly reports AAC payload equality with the accepted preceding cut; no narration or music re-encoding was introduced.",
+  "scope_limitations": [
+    "Sampled still-frame inspection does not certify every in-between frame or the subjective pace of continuous motion.",
+    "Automatic two-second pixel-change checks are editing aids, not a guarantee of excitement or comprehension.",
+    "The visual world is a stylized 3D reconstruction; volcanic ejection, ocean rise and chronology are time-compressed explanatory staging."
+  ],
+  "delivery_status": "Complete narrated video ready for the user's continuous viewing review."
+}
