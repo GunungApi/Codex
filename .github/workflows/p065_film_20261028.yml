@@ -2,7 +2,7 @@ name: P065 chemical differences film
 on:
   push:
     branches: ['production/p065-geochemistry-20261028']
-    paths: ['production/p065*.py', '.github/workflows/p065_film_20261028.yml']
+    paths: ['production/p065*.py', 'production/p065_prepare.sh', '.github/workflows/p065_film_20261028.yml']
 permissions:
   contents: read
   actions: read
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: bash production/p064_prepare.sh
+      - run: bash production/p065_prepare.sh
       - uses: actions/download-artifact@v4
         with:
           name: p064-v2-voice-runtime
@@ -33,6 +33,8 @@ jobs:
         run: |
           set -o pipefail
           python -u production/p065_film.py voice 2>&1 | tee voice_console.log
+          test -s p065_v1/timeline.json
+          test -s p065_v1/audio/master.wav
       - uses: actions/upload-artifact@v4
         if: success()
         with:
@@ -52,8 +54,30 @@ jobs:
             p065_v1/audio/pronunciation_review.json
             p065_v1/timeline.json
           retention-days: 14
-  shots:
+  preview:
     needs: narration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p065_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p065-audio
+          path: p065_v1
+      - name: Test native frames before full rendering
+        run: python -u production/p065_film.py preview
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p065-preflight-frames
+          path: p065_v1/review
+          retention-days: 14
+  shots:
+    needs: preview
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -66,7 +90,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: bash production/p064_prepare.sh
+      - run: bash production/p065_prepare.sh
       - uses: actions/download-artifact@v4
         with:
           name: p065-audio
@@ -74,7 +98,8 @@ jobs:
       - name: Render native 3D scene and check symbol separation
         run: |
           set -o pipefail
-          python -u production/p065_film.py shot ${{ matrix.scene }} 2>&1 | tee shot.log
+          mkdir -p p065_v1/review
+          python -u production/p065_film.py shot ${{ matrix.scene }} 2>&1 | tee p065_v1/review/shot_${{ matrix.scene }}.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -82,7 +107,6 @@ jobs:
           path: |
             p065_v1/render
             p065_v1/review
-            shot.log
           compression-level: 0
           retention-days: 14
   assemble:
@@ -94,7 +118,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: bash production/p064_prepare.sh
+      - run: bash production/p065_prepare.sh
       - uses: actions/download-artifact@v4
         with:
           name: p065-audio
