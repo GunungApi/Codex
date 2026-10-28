@@ -1,0 +1,134 @@
+name: P067 v4 inspected final landscape pass
+on:
+  push:
+    branches: ['production/p067-v4-kinetic-20261029']
+    paths: ['production/orwell_v4_finalpass.py', '.github/workflows/orwell_v4_final_reviewpass.yml']
+permissions:
+  contents: read
+  actions: read
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+  OPENBLAS_NUM_THREADS: '1'
+jobs:
+  shot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        scene: [0,3,4,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: bash production/prepare_kinetic_067.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          run-id: 40693127363
+          github-token: ${{ github.token }}
+          path: recovered_audio
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v4-preflight
+          run-id: 40723379134
+          github-token: ${{ github.token }}
+          path: inherited_preflight
+      - name: Render revised local scenery and inspect clearance
+        run: |
+          mkdir -p p067_v4/assets
+          cp -a inherited_preflight/p067_v4/assets/. p067_v4/assets/
+          python production/orwell_v4_finalpass.py prepare
+          python -u production/orwell_v4_finalpass.py shot ${{ matrix.scene }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p067-v4-finalpass-shot-${{ matrix.scene }}
+          path: |
+            p067_v4/render
+            p067_v4/review
+          compression-level: 1
+          retention-days: 30
+  assemble:
+    needs: shot
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: bash production/prepare_kinetic_067.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          run-id: 40693127363
+          github-token: ${{ github.token }}
+          path: recovered_audio
+      - uses: actions/download-artifact@v4
+        with:
+          name: heionreki-p067-v3-preview
+          run-id: 40710027226
+          github-token: ${{ github.token }}
+          path: original_preview
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v4-preflight
+          run-id: 40723379134
+          github-token: ${{ github.token }}
+          path: inherited_preflight
+      - run: |
+          mkdir -p p067_v4
+          cp -a inherited_preflight/p067_v4/. p067_v4/
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v4-shot-1
+          run-id: 40723379134
+          github-token: ${{ github.token }}
+          path: p067_v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v4-shot-5
+          run-id: 40723379134
+          github-token: ${{ github.token }}
+          path: p067_v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p067-v4-finalpass-shot-*
+          merge-multiple: true
+          path: p067_v4
+      - name: Finish exact-audio fourth version and machine validation
+        run: |
+          set -o pipefail
+          python production/orwell_v4_finalpass.py prepare
+          python -m pip freeze > p067_v4/source/requirements-lock.txt
+          python -u production/orwell_v4_finalpass.py assemble 2>&1 | tee final_console.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heionreki-p067-v4-final-delivery
+          path: p067_v4/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heionreki-p067-v4-final-preview
+          path: p067_v4/deliverables/heionreki_p067_v4_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p067-v4-final-picture-review-ooxml
+          path: p067_v4/review_ooxml
+          compression-level: 3
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p067-v4-final-inspection-records
+          path: |
+            p067_v4/review
+            p067_v4/timeline.json
+            final_console.log
+          compression-level: 3
+          retention-days: 30
