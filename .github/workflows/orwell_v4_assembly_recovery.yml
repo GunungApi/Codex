@@ -1,0 +1,99 @@
+name: P067 v4 final assembly recovery
+on:
+  push:
+    branches: ['production/p067-v4-kinetic-20261029']
+    paths: ['production/orwell_v4_assemble_recover.py', '.github/workflows/orwell_v4_assembly_recovery.yml']
+permissions:
+  contents: read
+  actions: read
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+  OPENBLAS_NUM_THREADS: '1'
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: bash production/prepare_kinetic_067.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          run-id: 40693127363
+          github-token: ${{ github.token }}
+          path: recovered_audio
+      - uses: actions/download-artifact@v4
+        with:
+          name: heionreki-p067-v3-preview
+          run-id: 40710027226
+          github-token: ${{ github.token }}
+          path: original_preview
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v4-preflight
+          run-id: 40723379134
+          github-token: ${{ github.token }}
+          path: inherited_preflight
+      - run: |
+          mkdir -p p067_v4
+          cp -a inherited_preflight/p067_v4/. p067_v4/
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v4-shot-1
+          run-id: 40723379134
+          github-token: ${{ github.token }}
+          path: p067_v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v4-shot-5
+          run-id: 40723379134
+          github-token: ${{ github.token }}
+          path: p067_v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p067-v4-finalpass-shot-*
+          run-id: 40725517730
+          github-token: ${{ github.token }}
+          merge-multiple: true
+          path: p067_v4
+      - name: Assemble the verified shot lineage and normalize review images
+        run: |
+          set -o pipefail
+          python production/orwell_v4_assemble_recover.py prepare
+          python -m pip freeze > p067_v4/source/requirements-lock.txt
+          python -u production/orwell_v4_assemble_recover.py assemble 2>&1 | tee final_console.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p067-v4-final-delivery
+          path: p067_v4/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p067-v4-final-preview
+          path: p067_v4/deliverables/heionreki_p067_v4_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p067-v4-final-picture-review-ooxml
+          path: p067_v4/review_ooxml
+          compression-level: 3
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p067-v4-final-inspection-records
+          path: |
+            p067_v4/review
+            p067_v4/timeline.json
+            final_console.log
+          compression-level: 3
+          retention-days: 30
