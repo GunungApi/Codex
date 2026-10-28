@@ -65,8 +65,11 @@ jobs:
           cp -a lineage8/p066_v1/. p066_v1/
           cp -a lineage9/p066_v1/. p066_v1/
           python production/refine_p066.py
-          cp production/refine_p066.py p066_v1/source/
+          python production/finalize_labels_066.py
+          cp production/refine_p066.py production/finalize_labels_066.py p066_v1/source/
           python -m pip freeze > p066_v1/source/requirements-lock.txt
+      - name: Re-render the one measured label conflict
+        run: python -u production/p066_film.py shot 4
       - name: Assemble and enforce final checks
         run: |
           set -o pipefail
