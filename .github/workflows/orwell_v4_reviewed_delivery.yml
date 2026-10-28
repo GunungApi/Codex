@@ -1,0 +1,52 @@
+name: P067 v4 reviewed delivery
+on:
+  push:
+    branches: ['production/p067-v4-kinetic-20261029']
+    paths: ['production/orwell_v4_completed_review.json', 'production/orwell_v4_delivery_qa.py', '.github/workflows/orwell_v4_reviewed_delivery.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: heionreki-p067-v4-final-delivery
+          run-id: 40727774935
+          github-token: ${{ github.token }}
+          path: incoming_delivery
+      - name: Update only completed review records and preserve video bytes
+        run: |
+          set -o pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('production/orwell_v4_delivery_qa.py')
+          s=p.read_text()
+          old="qa_path=work/'review/verification.json';qa=json.loads(qa_path.read_text())"
+          new="shutil.copy2('production/orwell_v4_assemble_recover.py',work/'source/orwell_v4_assemble_recover.py')\nwith (work/'source/REEDIT.txt').open('a',encoding='utf-8') as f:f.write('\\n完成品の組立てと確認画像の正規化は orwell_v4_assemble_recover.py assemble を使う。\\n')\n"+old
+          assert old in s
+          p.write_text(s.replace(old,new))
+          PY
+          python -u production/orwell_v4_delivery_qa.py 2>&1 | tee reviewed_delivery.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heionreki-p067-v4-reviewed-delivery
+          path: checked_delivery
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p067-v4-reviewed-records
+          path: |
+            checked_project/review/verification.json
+            checked_project/review/completed_visual_review.json
+            checked_project/review/manifest.json
+            reviewed_delivery.log
+          compression-level: 3
+          retention-days: 30
