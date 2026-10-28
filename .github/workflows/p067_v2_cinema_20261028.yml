@@ -1,0 +1,158 @@
+name: P067 v2 cinematic landscape revision
+on:
+  push:
+    branches: ['production/p067-v2-cinema-20261028']
+    paths: ['production/p067v2*.py', '.github/workflows/p067_v2_cinema_20261028.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p067-v2-cinematic-production
+  cancel-in-progress: true
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+  OPENBLAS_NUM_THREADS: '1'
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare bounded native 3D environment
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067v2-system.log 2>&1 || { cat /tmp/p067v2-system.log; exit 1; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0
+          curl -fsSL --retry 2 --max-time 80 https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf -o "$RUNNER_TEMP/NotoSansCJKjp-Bold.otf"
+          echo "P067_FONT=$RUNNER_TEMP/NotoSansCJKjp-Bold.otf" >> "$GITHUB_ENV"
+          python -m py_compile production/p067v2_scene.py production/p067v2_finish.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          run-id: 40693127363
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: recovered_audio
+      - name: Preserve original voice and inspect difficult terrain shots
+        run: |
+          set -o pipefail
+          python -u production/p067v2_finish.py prepare
+          python -u production/p067v2_finish.py preview 2>&1 | tee preflight_console.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p067-v2-preflight
+          path: |
+            p067_v2/review
+            p067_v2/timeline.json
+            preflight_console.log
+          compression-level: 3
+          retention-days: 30
+  shot:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        scene: [0,1,2,3,4,5,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare native renderer and Japanese type
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067v2-system.log 2>&1 || { cat /tmp/p067v2-system.log; exit 1; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0
+          curl -fsSL --retry 2 --max-time 80 https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf -o "$RUNNER_TEMP/NotoSansCJKjp-Bold.otf"
+          echo "P067_FONT=$RUNNER_TEMP/NotoSansCJKjp-Bold.otf" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v2-preflight
+          path: inherited
+      - name: Restore verified timeline
+        run: |
+          mkdir -p p067_v2
+          cp inherited/p067_v2/timeline.json p067_v2/timeline.json
+      - name: Render native 1080x1920 scene with geometry checks
+        run: |
+          set -o pipefail
+          python -u production/p067v2_finish.py shot ${{ matrix.scene }} 2>&1 | tee shot_console.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p067-v2-shot-${{ matrix.scene }}
+          path: |
+            p067_v2/render
+            p067_v2/review
+            shot_console.log
+          compression-level: 0
+          retention-days: 30
+  assemble:
+    needs: shot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare finishing environment
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067v2-system.log 2>&1 || { cat /tmp/p067v2-system.log; exit 1; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0
+          curl -fsSL --retry 2 --max-time 80 https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf -o "$RUNNER_TEMP/NotoSansCJKjp-Bold.otf"
+          echo "P067_FONT=$RUNNER_TEMP/NotoSansCJKjp-Bold.otf" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          run-id: 40693127363
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: recovered_audio
+      - uses: actions/download-artifact@v4
+        with:
+          name: heionreki-p067-v1-final-preview
+          run-id: 40693127363
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: original_preview
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p067-v2-shot-*
+          path: inherited_shots
+          merge-multiple: false
+      - name: Assemble polished pictures with unchanged voice
+        run: |
+          set -o pipefail
+          python production/p067v2_finish.py prepare
+          for i in {0..9}; do cp -a "inherited_shots/p067-v2-shot-$i/p067_v2/." p067_v2/; done
+          python -m pip freeze > p067_v2/source/requirements-lock.txt
+          python -u production/p067v2_finish.py assemble 2>&1 | tee final_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p067-v2-delivery
+          path: p067_v2/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p067-v2-preview
+          path: p067_v2/deliverables/heionreki_p067_v2_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p067-v2-review
+          path: |
+            p067_v2/review
+            p067_v2/timeline.json
+            final_console.log
+          compression-level: 3
+          retention-days: 30
