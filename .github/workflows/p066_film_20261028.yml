@@ -1,0 +1,160 @@
+name: P066 full film production
+on:
+  push:
+    branches: ['production/p066-v1-film-20261028']
+    paths: ['production/p066*.py', '.github/workflows/p066_film_20261028.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p066-v1-film
+  cancel-in-progress: true
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare production environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri > /tmp/p066-apt.log 2>&1
+          python -m pip install --quiet numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+          python -m py_compile production/p066_film.py
+          mkdir -p p066_v1/source
+          python -m pip freeze > p066_v1/source/requirements-lock.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: p064-v2-voice-runtime
+          run-id: 40447758536
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: runtime
+      - name: Generate narrated timeline and original score
+        run: |
+          set -o pipefail
+          python -u production/p066_film.py voice 2>&1 | tee voice_console.log
+      - name: Preflight all ten scene designs
+        run: |
+          set -o pipefail
+          python -u production/p066_film.py preview 2>&1 | tee preview_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: p066-v1-audio
+          path: |
+            p066_v1/audio
+            p066_v1/timeline.json
+            p066_v1/docs
+            p066_v1/source
+            p066_v1/review
+            voice_console.log
+            preview_console.log
+          compression-level: 3
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: p066-v1-initial-diagnostic
+          path: |
+            voice_console.log
+            preview_console.log
+            p066_v1/audio/engine.log
+            p066_v1/review
+          retention-days: 7
+  shot:
+    needs: narration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        scene: [0,1,2,3,4,5,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare native renderer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri > /tmp/p066-apt.log 2>&1
+          python -m pip install --quiet numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: p066-v1-audio
+          path: recovered
+      - name: Restore exact generated audio and timeline
+        run: |
+          if [ -d recovered/p066_v1 ]; then cp -a recovered/p066_v1 .; else mkdir -p p066_v1; cp -a recovered/. p066_v1/; fi
+      - name: Render full-resolution scene and check separation
+        run: python -u production/p066_film.py shot ${{ matrix.scene }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p066-v1-shot-${{ matrix.scene }}
+          path: |
+            p066_v1/render
+            p066_v1/review
+          compression-level: 0
+          retention-days: 30
+  assemble:
+    needs: shot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare finishing environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri > /tmp/p066-apt.log 2>&1
+          python -m pip install --quiet numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: p066-v1-audio
+          path: recovered
+      - run: |
+          if [ -d recovered/p066_v1 ]; then cp -a recovered/p066_v1 .; else mkdir -p p066_v1; cp -a recovered/. p066_v1/; fi
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p066-v1-shot-*
+          merge-multiple: true
+          path: p066_v1
+      - name: Master, fully decode, measure and package
+        run: |
+          set -o pipefail
+          python -u production/p066_film.py assemble 2>&1 | tee final_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p066-v1-delivery
+          path: p066_v1/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p066-v1-preview
+          path: p066_v1/deliverables/heionreki_p066_v1_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p066-v1-review
+          path: |
+            p066_v1/review
+            p066_v1/timeline.json
+            final_console.log
+          compression-level: 3
+          retention-days: 30
