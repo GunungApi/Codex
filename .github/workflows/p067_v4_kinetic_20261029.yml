@@ -1,0 +1,190 @@
+name: P067 v4 event-driven cinematic cut
+on:
+  push:
+    branches: ['production/p067-v4-kinetic-20261029']
+    paths: ['production/p067v4_kinetic.py', '.github/workflows/p067_v4_kinetic_20261029.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p067-v4-kinetic
+  cancel-in-progress: true
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+  OPENBLAS_NUM_THREADS: '1'
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Prepare native renderer
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067v4-system.log 2>&1 || { cat /tmp/p067v4-system.log; exit 1; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 python-docx
+          curl -fsSL --retry 2 --max-time 80 https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf -o "$RUNNER_TEMP/NotoSansCJKjp-Bold.otf"
+          echo "P067_FONT=$RUNNER_TEMP/NotoSansCJKjp-Bold.otf" >> "$GITHUB_ENV"
+          python -m py_compile production/p067v4_kinetic.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          run-id: 40693127363
+          github-token: ${{ github.token }}
+          path: recovered_audio
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v3-preflight
+          run-id: 40710027226
+          github-token: ${{ github.token }}
+          path: inherited_material
+      - name: Preserve narration and license-tracked rock maps
+        run: |
+          mkdir -p p067_v4/assets
+          cp -a inherited_material/assets/. p067_v4/assets/
+          python production/p067v4_kinetic.py prepare
+      - name: Test scene events and produce private picture review
+        run: |
+          set -o pipefail
+          python -u production/p067v4_kinetic.py preview 2>&1 | tee preflight_console.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p067-v4-preflight-visual-ooxml
+          path: p067_v4/review_ooxml
+          retention-days: 7
+          compression-level: 3
+      - name: Render chronology and eruption continuity tests
+        run: |
+          set -o pipefail
+          python -u production/p067v4_kinetic.py testclip 2>&1 | tee testclip_console.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p067-v4-preflight
+          path: |
+            p067_v4/render
+            p067_v4/review
+            p067_v4/assets
+            preflight_console.log
+            testclip_console.log
+          retention-days: 30
+          compression-level: 1
+  shot:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        scene: [0,1,4,5,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Prepare native renderer and typography
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067v4-system.log 2>&1 || { cat /tmp/p067v4-system.log; exit 1; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 python-docx
+          curl -fsSL --retry 2 --max-time 80 https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf -o "$RUNNER_TEMP/NotoSansCJKjp-Bold.otf"
+          echo "P067_FONT=$RUNNER_TEMP/NotoSansCJKjp-Bold.otf" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          run-id: 40693127363
+          github-token: ${{ github.token }}
+          path: recovered_audio
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v4-preflight
+          path: inherited_preflight
+      - name: Render complete native shot with collision checks
+        run: |
+          mkdir -p p067_v4/assets
+          cp -a inherited_preflight/p067_v4/assets/. p067_v4/assets/
+          python production/p067v4_kinetic.py prepare
+          python -u production/p067v4_kinetic.py shot ${{ matrix.scene }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p067-v4-shot-${{ matrix.scene }}
+          path: |
+            p067_v4/render
+            p067_v4/review
+          retention-days: 30
+          compression-level: 1
+  assemble:
+    needs: [preflight,shot]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Prepare finishing environment
+        run: |
+          sudo timeout 100 apt-get install -y -qq ffmpeg libegl1 libegl-mesa0 libgl1-mesa-dri >/tmp/p067v4-system.log 2>&1 || { cat /tmp/p067v4-system.log; exit 1; }
+          python -m pip install --quiet --timeout 30 numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 python-docx
+          curl -fsSL --retry 2 --max-time 80 https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf -o "$RUNNER_TEMP/NotoSansCJKjp-Bold.otf"
+          echo "P067_FONT=$RUNNER_TEMP/NotoSansCJKjp-Bold.otf" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v1-audio
+          run-id: 40693127363
+          github-token: ${{ github.token }}
+          path: recovered_audio
+      - uses: actions/download-artifact@v4
+        with:
+          name: heionreki-p067-v3-preview
+          run-id: 40710027226
+          github-token: ${{ github.token }}
+          path: original_preview
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v4-preflight
+          path: recovered_preflight
+      - name: Restore completed test shots and exact narration
+        run: |
+          mkdir -p p067_v4
+          cp -a recovered_preflight/p067_v4/. p067_v4/
+          python production/p067v4_kinetic.py prepare
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p067-v4-shot-*
+          merge-multiple: true
+          path: p067_v4
+      - name: Assemble and enforce decoding, frame and audio checks
+        run: |
+          set -o pipefail
+          python -m pip freeze > p067_v4/source/requirements-lock.txt
+          python -u production/p067v4_kinetic.py assemble 2>&1 | tee final_console.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heionreki-p067-v4-delivery
+          path: p067_v4/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heionreki-p067-v4-preview
+          path: p067_v4/deliverables/heionreki_p067_v4_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p067-v4-final-visual-ooxml
+          path: p067_v4/review_ooxml
+          compression-level: 3
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p067-v4-final-review
+          path: |
+            p067_v4/review
+            p067_v4/timeline.json
+            final_console.log
+          compression-level: 3
+          retention-days: 30
