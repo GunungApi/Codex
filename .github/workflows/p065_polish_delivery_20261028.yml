@@ -1,0 +1,83 @@
+name: P065 final causal polish and delivery
+on:
+  push:
+    branches: ['production/p065-v1-film-20261028']
+    paths: ['production/finish_065.py', 'production/audit_065.py', '.github/workflows/p065_polish_delivery_20261028.yml']
+permissions:
+  contents: read
+  actions: read
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare renderer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri > /tmp/p065-apt.log 2>&1
+          python -m pip install --quiet numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+          python production/p065_polish.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: p065-v1-audio
+          run-id: 40630779132
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: p065_v1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p065-v1-shot-*
+          run-id: 40630779132
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-multiple: true
+          path: p065_v1
+      - name: Apply causal input-transfer-output choreography
+        run: python production/finish_065.py
+      - name: Re-render only the five improved reaction shots
+        run: |
+          set -o pipefail
+          for shot in 3 4 5 7 8; do
+            python -u production/p065_film.py shot "$shot"
+          done 2>&1 | tee polish_console.log
+      - name: Check all frame positions and projected gaps
+        run: |
+          set -o pipefail
+          python -u production/audit_065.py 2>&1 | tee projection_console.log
+      - name: Final media and reproducible package
+        run: |
+          set -o pipefail
+          cp production/finish_065.py production/audit_065.py p065_v1/source/
+          python -u production/p065_film.py assemble 2>&1 | tee final_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p065-v1-finished-package
+          path: p065_v1/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p065-v1-finished-preview
+          path: p065_v1/deliverables/heionreki_p065_v1_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p065-v1-finished-review
+          path: |
+            p065_v1/review
+            p065_v1/timeline.json
+            polish_console.log
+            projection_console.log
+            final_console.log
+          compression-level: 3
+          retention-days: 30
