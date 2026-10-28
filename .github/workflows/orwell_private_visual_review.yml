@@ -1,0 +1,37 @@
+name: Orwell private visual review
+on:
+  push:
+    branches: ['production/p067-v3-rocktime-20261028']
+    paths: ['.github/workflows/orwell_private_visual_review.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: heionreki-p067-v2-review
+          run-id: 40698801062
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: old_review
+      - uses: actions/download-artifact@v4
+        with:
+          name: p067-v3-preflight
+          run-id: 40710027226
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: new_review
+      - run: python production/review_orwell_frames.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p067-v3-visual-pages-ooxml
+          path: review_document/
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
