@@ -1,0 +1,152 @@
+name: P065 full film production
+on:
+  push:
+    branches: ['production/p065-v1-film-20261028']
+    paths: ['production/p065*.py', '.github/workflows/p065_film_20261028.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p065-v1-film
+  cancel-in-progress: true
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare trusted renderer and typography
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri > /tmp/p065-apt.log 2>&1
+          python -m pip install --quiet numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+          python production/p065_polish.py
+          mkdir -p p065_v1/source
+          python -m pip freeze > p065_v1/source/requirements-lock.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: p064-v2-voice-runtime
+          run-id: 40447758536
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: runtime
+      - name: Generate and check narration then master the sound
+        run: |
+          set -o pipefail
+          python -u production/p065_film.py voice 2>&1 | tee voice_console.log
+      - name: Test most complex comparison and mixing scenes
+        run: |
+          python -u production/p065_film.py preview
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: p065-v1-audio
+          path: |
+            p065_v1/audio
+            p065_v1/timeline.json
+            p065_v1/docs
+            p065_v1/source
+            p065_v1/review
+          compression-level: 3
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: p065-v1-initial-diagnostic
+          path: |
+            voice_console.log
+            p065_v1/audio/engine.log
+            p065_v1/review
+          retention-days: 7
+  shot:
+    needs: narration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        scene: [0,1,2,3,4,5,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare render environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri > /tmp/p065-apt.log 2>&1
+          python -m pip install --quiet numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+          python production/p065_polish.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: p065-v1-audio
+          path: p065_v1
+      - name: Native-resolution shot with material-spacing checks
+        run: python -u production/p065_film.py shot ${{ matrix.scene }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p065-v1-shot-${{ matrix.scene }}
+          path: |
+            p065_v1/render
+            p065_v1/review
+          compression-level: 0
+          retention-days: 30
+  assemble:
+    needs: shot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk libegl1 libegl-mesa0 libgl1-mesa-dri > /tmp/p065-apt.log 2>&1
+          python -m pip install --quiet numpy scipy Pillow moderngl==5.12.0 glcontext==3.0.0 soundfile
+          python production/p065_polish.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: p065-v1-audio
+          path: p065_v1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p065-v1-shot-*
+          merge-multiple: true
+          path: p065_v1
+      - name: Assemble, fully decode, measure, and package
+        run: |
+          set -o pipefail
+          python -u production/p065_film.py assemble 2>&1 | tee final_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p065-v1-delivery
+          path: p065_v1/deliverables
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: heionreki-p065-v1-preview
+          path: p065_v1/deliverables/heionreki_p065_v1_light_720x1280.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p065-v1-review
+          path: |
+            p065_v1/review
+            final_console.log
+            p065_v1/timeline.json
+          compression-level: 3
+          retention-days: 30
