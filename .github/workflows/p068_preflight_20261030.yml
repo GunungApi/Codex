@@ -1,0 +1,60 @@
+name: P068 underwater preflight and difficult shot
+on:
+  push:
+    branches: ['production/p068-underwater-20261030']
+    paths: ['.github/workflows/p068_preflight_20261030.yml', 'production/p068_scene.py', 'production/p068_refine.py']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p068-preflight-20261030
+  cancel-in-progress: true
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+  OPENBLAS_NUM_THREADS: '1'
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p068_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p068-v1-audio
+          run-id: 41004664357
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: p068_v1
+      - name: Test ten native scenes and visibility
+        run: |
+          set -o pipefail
+          python -u production/p068_scene.py preview 2>&1 | tee preflight_console.log
+      - name: Build private visual review
+        if: always()
+        run: python production/p068_finish.py review preflight
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p068-preflight-visual-ooxml
+          path: p068_v1/review/preflight_ooxml
+          include-hidden-files: true
+          retention-days: 7
+          compression-level: 0
+      - name: Render complete uptake shot for continuous-motion test
+        run: python -u production/p068_scene.py shot 4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p068-v1-preflight
+          path: |
+            p068_v1/render
+            p068_v1/review
+            p068_v1/source
+            preflight_console.log
+          retention-days: 30
+          compression-level: 1
