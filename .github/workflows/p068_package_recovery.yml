@@ -1,0 +1,85 @@
+name: P068 complete media packaging
+on:
+  push:
+    branches: ['production/p068-underwater-20261030']
+    paths: ['.github/workflows/p068_package_recovery.yml']
+permissions:
+  contents: read
+  actions: read
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OPENBLAS_NUM_THREADS: '1'
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p068_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p068-v1-audio
+          run-id: 41004664357
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: p068_v1
+      - uses: actions/download-artifact@v4
+        with:
+          name: heionreki-p068-v1-delivery
+          run-id: 41006295227
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: p068_v1/deliverables
+      - uses: actions/download-artifact@v4
+        with:
+          name: p068-refined-preflight
+          run-id: 41006295227
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: inherited_preflight
+      - run: cp -a inherited_preflight/p068_v1/. p068_v1/
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p068-refined-shot-*
+          run-id: 41006295227
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-multiple: true
+          path: p068_v1
+      - uses: actions/download-artifact@v4
+        with:
+          name: p068-final-verification
+          run-id: 41006295227
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: inherited_verification
+      - run: cp -a inherited_verification/p068_v1/. p068_v1/
+      - name: Normalize review images and finalize reproducible package
+        run: |
+          set -o pipefail
+          python -u production/p068_package.py 2>&1 | tee package_console.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p068-v1-complete-delivery
+          path: p068_v1/deliverables
+          retention-days: 30
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p068-completed-visual-ooxml
+          path: p068_v1/review/final_ooxml
+          include-hidden-files: true
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p068-packaged-records
+          path: |
+            p068_v1/review/verification.json
+            p068_v1/review/manifest.json
+            p068_v1/timeline.json
+            package_console.log
+          retention-days: 30
+          compression-level: 3
