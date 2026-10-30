@@ -1,0 +1,154 @@
+name: P068 refined underwater cinema
+on:
+  push:
+    branches: ['production/p068-underwater-20261030']
+    paths: ['.github/workflows/p068_cinema_20261030.yml']
+permissions:
+  contents: read
+  actions: read
+env:
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  LP_NUM_THREADS: '3'
+  OMP_NUM_THREADS: '3'
+  OPENBLAS_NUM_THREADS: '1'
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p068_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p068-v1-audio
+          run-id: 41004664357
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: p068_v1
+      - name: Test refined scene events and clearances
+        run: |
+          set -o pipefail
+          python -u production/p068_action.py preview 2>&1 | tee preflight_console.log
+          python production/p068_finish.py review preflight
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p068-refined-visual-ooxml
+          path: p068_v1/review/preflight_ooxml
+          include-hidden-files: true
+          retention-days: 7
+          compression-level: 0
+      - name: Test complete continuous uptake shot
+        run: python -u production/p068_action.py shot 4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p068-refined-preflight
+          path: |
+            p068_v1/render
+            p068_v1/review
+            preflight_console.log
+          retention-days: 30
+          compression-level: 1
+  shot:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        scene: [0,1,2,3,5,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p068_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p068-v1-audio
+          run-id: 41004664357
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: p068_v1
+      - name: Render native scene with per-frame geometry and visibility checks
+        run: python -u production/p068_action.py shot ${{ matrix.scene }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p068-refined-shot-${{ matrix.scene }}
+          path: |
+            p068_v1/render
+            p068_v1/review
+          retention-days: 30
+          compression-level: 0
+  assemble:
+    needs: shot
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: bash production/p068_prepare.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: p068-v1-audio
+          run-id: 41004664357
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: p068_v1
+      - uses: actions/download-artifact@v4
+        with:
+          name: p068-refined-preflight
+          path: preflight_download
+      - name: Recover completed uptake shot and preview records
+        run: cp -a preflight_download/p068_v1/. p068_v1/
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: p068-refined-shot-*
+          path: p068_v1
+          merge-multiple: true
+      - name: Assemble synchronized native film and reproducible deliverables
+        run: |
+          set -o pipefail
+          cp production/p068_action.py production/p068_prepare.sh p068_v1/source/
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('production/p068_finish.py');s=p.read_text().replace('python source/p068_scene.py shot 0〜9、python source/p068_finish.py assemble','python source/p068_action.py shot 0〜9、python source/p068_action.py assemble');p.write_text(s)
+          PY
+          python -u production/p068_action.py assemble 2>&1 | tee assembly_console.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p068-v1-delivery
+          path: p068_v1/deliverables
+          retention-days: 30
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: heionreki-p068-v1-preview
+          path: p068_v1/deliverables/heionreki_p068_v1_light_720x1280.mp4
+          retention-days: 30
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p068-final-visual-ooxml
+          path: p068_v1/review/final_ooxml
+          include-hidden-files: true
+          retention-days: 7
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p068-final-verification
+          path: |
+            p068_v1/review
+            p068_v1/timeline.json
+            assembly_console.log
+          retention-days: 30
+          compression-level: 3
