@@ -1,0 +1,52 @@
+name: P068 narration and exact speech timing
+on:
+  push:
+    branches: ['production/p068-underwater-20261030']
+    paths: ['production/p068_audio.py', '.github/workflows/p068_narration_20261030.yml']
+permissions:
+  contents: read
+concurrency:
+  group: p068-narration-20261030
+  cancel-in-progress: true
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OMP_NUM_THREADS: '3'
+      OPENBLAS_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Prepare audio dependencies
+        run: |
+          sudo timeout 240 apt-get install -y --no-install-recommends ffmpeg libsndfile1 >/tmp/p068-audio-apt.log 2>&1 || { cat /tmp/p068-audio-apt.log; exit 1; }
+          python -m pip install --quiet --timeout 45 numpy scipy Pillow soundfile moderngl==5.12.0 glcontext==3.0.0
+          python -m py_compile production/p068_audio.py
+      - name: Recover official runtime and synthesize approved voice
+        run: |
+          set -o pipefail
+          python -u production/p068_audio.py 2>&1 | tee narration_console.log
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: p068-v1-audio
+          path: |
+            p068_v1/audio
+            p068_v1/timeline.json
+            p068_v1/docs
+            p068_v1/source
+            p068_v1/review
+          retention-days: 30
+          compression-level: 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p068-narration-diagnostics
+          path: |
+            narration_console.log
+            p068_v1/audio/engine.log
+            p068_v1/review
+          retention-days: 7
