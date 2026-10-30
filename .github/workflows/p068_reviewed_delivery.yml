@@ -1,0 +1,78 @@
+name: P068 reviewed final delivery
+on:
+  push:
+    branches: ['production/p068-underwater-20261030']
+    paths: ['.github/workflows/p068_reviewed_delivery.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  reviewed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: heionreki-p068-v1-complete-delivery
+          run-id: 41007113758
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: delivery
+      - name: Preserve movies and append actual visual-inspection record
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json,zipfile,hashlib,shutil
+          d=Path('delivery');root=Path('p068_v1');root.mkdir()
+          archive=d/'heionreki_p068_v1_production.zip'
+          before={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in d.glob('*.mp4')}
+          assert len(before)==2
+          with zipfile.ZipFile(archive) as z:z.extractall(root)
+          q=root/'review/verification.json';qa=json.loads(q.read_text())
+          qa['visual_inspection_performed']=True
+          qa['continuous_preview_watched']=False
+          qa['auditory_listening_performed']=False
+          qa['preflight_visual_review']['completed_video_frames_review']='20 encoded frames, one at the middle of each narration cue, inspected visually after final encoding.'
+          qa['final_visual_inspection']={'checked_date':'2026-10-30','pictures':20,'image_series':'encoded_00 through encoded_19','method':'Final movie frames reviewed as rendered private PDF pages, not code-only review.','observations':['All 20 sampled narration captions visible and within the image.','Cell surface and outline readable against the blue-green mineral environment.','Cutaway and internal material symbols visible in the uptake scene.','Principal comparison cells spatially separated in the inspected pictures.','Chronology path kept above the cells after refinement.','Warm-current gold lines explicitly described as an explanatory visualization.'],'scope_limit':'Static-frame inspection plus full-video decoding and per-frame geometry tests. Continuous-motion viewing and auditory listening were not performed.'}
+          q.write_text(json.dumps(qa,ensure_ascii=False,indent=2),encoding='utf-8')
+          filename='heionreki_p068_v1_script_and_sources.txt'
+          note=d/filename;s=note.read_text()
+          s=s.replace('"visual_inspection_performed": false','"visual_inspection_performed": true')
+          s=s.replace('完成動画の目視記録は別途追加。','完成動画の全20字幕区間から各1画面を抽出し、20画面を目視確認済み。')
+          s+='\n\n完成映像の目視確認（2026-10-30）：\n全20字幕区間の中間時刻から抜き出した完成MP4の20画面を確認。膜の表面、材料の取り込みを示す断面、文字の収まり、年代線と細胞の分離、暖かな水の説明表示を確認した。試作20画面と動き改良後の重要8画面の確認も実施済み。通し再生と耳による試聴は未実施。\n'
+          s+='\n再編集性：完成画像を確認文書へ入れる直前に画像を標準PNGへ変換する処理を、同梱の仕上げコードへ追加。今回の完成動画2本は変更せず、照合用のSHA-256を保持。\n'
+          note.write_text(s,encoding='utf-8');(root/'deliverables'/filename).write_text(s,encoding='utf-8')
+          p=root/'source/p068_finish.py';code=p.read_text()
+          old="doc.add_picture(str(p),width=Inches(5.6))"
+          new="buf=io.BytesIO();Image.open(p).convert('RGB').save(buf,format='PNG');buf.seek(0);doc.add_picture(buf,width=Inches(5.6))"
+          assert old in code
+          code=code.replace(old,new).replace('from pathlib import Path','import io\nfrom pathlib import Path',1);p.write_text(code,encoding='utf-8')
+          compile(code,str(p),'exec')
+          for p in d.glob('*.mp4'):assert hashlib.sha256(p.read_bytes()).hexdigest()==before[p.name]
+          for p in root.rglob('*'):
+              assert not (p.is_file() and p.suffix.lower() in ['.ttf','.ttc','.otf']),p
+          manifest=[]
+          for p in root.rglob('*'):
+              if p.is_file() and p.name!='manifest.json':manifest.append({'path':str(p.relative_to(root)),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          (root/'review/manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2))
+          with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED,3) as z:
+              for p in root.rglob('*'):
+                  if p.is_file():z.write(p,str(p.relative_to(root)))
+          Path('records').mkdir();shutil.copy(q,'records/verification.json');shutil.copy(root/'timeline.json','records/timeline.json')
+          print('VERIFIED_FINAL',json.dumps(qa,ensure_ascii=False))
+          print('DELIVERABLES',json.dumps([{'name':p.name,'bytes':p.stat().st_size} for p in sorted(d.iterdir())],ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: heionreki-p068-v1-reviewed-delivery
+          path: delivery
+          retention-days: 30
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p068-reviewed-records
+          path: records
+          retention-days: 30
+          compression-level: 3
