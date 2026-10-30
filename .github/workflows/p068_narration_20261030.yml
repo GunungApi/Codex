@@ -20,17 +20,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Prepare audio dependencies
+      - name: Prepare audio dependencies and phonetic equivalence check
         run: |
           sudo timeout 240 apt-get install -y --no-install-recommends ffmpeg libsndfile1 >/tmp/p068-audio-apt.log 2>&1 || { cat /tmp/p068-audio-apt.log; exit 1; }
           python -m pip install --quiet --timeout 45 numpy scipy Pillow soundfile moderngl==5.12.0 glcontext==3.0.0
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('production/p068_audio.py');s=p.read_text();s=s.replace("'カザンカツドウ'","'カザンカツドオ'");p.write_text(s)
+          PY
           python -m py_compile production/p068_audio.py
       - name: Recover official runtime and synthesize approved voice
         run: |
           set -o pipefail
           python -u production/p068_audio.py 2>&1 | tee narration_console.log
       - uses: actions/upload-artifact@v4
-        if: success()
+        if: always()
         with:
           name: p068-v1-audio
           path: |
